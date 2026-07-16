@@ -53,6 +53,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoSubmit: CheckBox
     private lateinit var autoScan: CheckBox
     private lateinit var scanNowButton: Button
+    private lateinit var textSizeButton: Button
+    private var webTextZoom = 90
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
@@ -76,6 +78,7 @@ class MainActivity : ComponentActivity() {
         autoSubmit = findViewById(R.id.autoSubmit)
         autoScan = findViewById(R.id.autoScan)
         scanNowButton = findViewById(R.id.scanNowButton)
+        textSizeButton = findViewById(R.id.textSizeButton)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -104,6 +107,20 @@ class MainActivity : ComponentActivity() {
             manualScanRequested = true
             statusText.visibility = View.VISIBLE
             statusText.text = "Ready for one scan..."
+        }
+
+        webView.settings.textZoom = webTextZoom
+        textSizeButton.text = "PIMS $webTextZoom%"
+
+        textSizeButton.setOnClickListener {
+            webTextZoom -= 10
+
+            if (webTextZoom < 50) {
+                webTextZoom = 100
+            }
+
+            webView.settings.textZoom = webTextZoom
+            textSizeButton.text = "PIMS $webTextZoom%"
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
