@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var statusText: TextView
     private lateinit var pimsUrl: EditText
     private lateinit var autoSubmit: CheckBox
+    private lateinit var autoScan: CheckBox
+    private lateinit var scanNowButton: Button
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
@@ -72,6 +74,8 @@ class MainActivity : ComponentActivity() {
         statusText = findViewById(R.id.statusText)
         pimsUrl = findViewById(R.id.pimsUrl)
         autoSubmit = findViewById(R.id.autoSubmit)
+        autoScan = findViewById(R.id.autoScan)
+        scanNowButton = findViewById(R.id.scanNowButton)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -95,6 +99,12 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
+
+        scanNowButton.setOnClickListener {
+            manualScanRequested = true
+            statusText.visibility = View.VISIBLE
+            statusText.text = "Ready for one scan..."
+        }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
