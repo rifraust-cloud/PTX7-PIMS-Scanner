@@ -354,28 +354,28 @@ class MainActivity : ComponentActivity() {
                 Array.from(document.querySelectorAll('input, textarea'))
                     .filter(visible);
 
-              let input =
-                inputs.find(el =>
-                    ((el.placeholder || '').toLowerCase()
-                        .includes('location barcode'))
-                ) ||
-                inputs.find(el =>
-                    ((el.getAttribute('aria-label') || '').toLowerCase()
-                        .includes('location barcode'))
-                ) ||
-                inputs.find(el =>
-                    ((el.name || '').toLowerCase()
-                        .includes('location'))
-                ) ||
-                inputs.find(el =>
-                    ((el.id || '').toLowerCase()
-                        .includes('location'))
-                );
+              let input = null;
+
+              const active = document.activeElement;
+
+              if (
+                  active &&
+                  (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') &&
+                  visible(active)
+              ) {
+                  input = active;
+              }
+
+              if (!input) {
+                  input =
+                    inputs.find(el => el === document.activeElement) ||
+                    inputs.find(el => !el.disabled && !el.readOnly);
+              }
 
               if (!input) {
                 return JSON.stringify({
                     ok:false,
-                    message:'Location input not found'
+                    message:'No active input field found'
                 });
               }
 
@@ -482,7 +482,7 @@ class MainActivity : ComponentActivity() {
                         "Location input not found",
                         ignoreCase = true
                     ) ->
-                        "Could not find the Location Barcode field"
+                        "Could not find an active PIMS input field"
 
                     result.contains(
                         "Submit clicked",
