@@ -17,7 +17,7 @@
     <androidx.camera.view.PreviewView
         android:id="@+id/previewView"
         android:layout_width="match_parent"
-        android:layout_height="280dp"
+        android:layout_height="180dp"
         app:implementationMode="performance" />
 
     <TextView
