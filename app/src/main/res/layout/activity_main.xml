@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -8,9 +9,24 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="PTX7 PIMS Scanner"
+        android:text="PTX7 PIMS Scanner v0.3"
         android:textSize="24sp"
         android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="280dp"
+        app:implementationMode="performance" />
+
+    <TextView
+        android:id="@+id/debugText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Scanner debug information will appear here"
+        android:textSize="14sp"
+        android:paddingTop="8dp"
         android:paddingBottom="8dp" />
 
     <EditText
@@ -35,13 +51,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/scanButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Scan" />
 
         <Button
             android:id="@+id/copyButton"
@@ -82,14 +91,14 @@
         android:id="@+id/autoSubmit"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="After each scan, send to integrated PIMS and submit"
-        android:checked="true" />
+        android:text="After scan, send to integrated PIMS and submit"
+        android:checked="false" />
 
     <TextView
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Ready"
+        android:text="Requesting camera permission..."
         android:paddingBottom="6dp" />
 
     <WebView
