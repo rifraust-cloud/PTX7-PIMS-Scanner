@@ -69,7 +69,8 @@ class MainActivity : ComponentActivity() {
 
     private var webPageScale = 10
     private var pimsFullscreen = false
-private lateinit var cameraExecutor: ExecutorService
+
+    private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
 
     private var lastScanValue: String = ""
@@ -192,9 +193,6 @@ private lateinit var cameraExecutor: ExecutorService
             togglePimsFullscreen()
         }
 
-            webView.settings.textZoom = webTextZoom
-            textSizeButton.text = "PIMS $webTextZoom%"
-        }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
