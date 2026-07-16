@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private var lastScanValue: String = ""
     private var lastAcceptedValue: String? = null
     private var lastAcceptedTime: Long = 0L
+    private var manualScanRequested: Boolean = false
+    private var lastAutoScanAttempt: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -164,7 +166,7 @@ class MainActivity : ComponentActivity() {
 
                     val raw = barcode.rawValue?.trim().orEmpty()
 
-                    if (raw.isNotBlank() && acceptScan(raw)) {
+                    if (raw.isNotBlank() && shouldAcceptScan(raw)) {
                         runOnUiThread {
                             handleSuccessfulScan(raw, barcode.format)
                         }
@@ -198,10 +200,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun acceptScan(value: String): Boolean {
+    private fun shouldAcceptScan(value: String): Boolean {
         val now = SystemClock.elapsedRealtime()
 
-        if (value == lastAcceptedValue && now - lastAcceptedTime < 1500L) {
+        val allowedByMode =
+            if (manualScanRequested) {
+                manualScanRequested = false
+                true
+            } else if (autoScan.isChecked) {
+                if (now - lastAutoScanAttempt < 1000L) {
+                    false
+                } else {
+                    lastAutoScanAttempt = now
+                    true
+                }
+            } else {
+                false
+            }
+
+        if (!allowedByMode) {
+            return false
+        }
+
+        if (value == lastAcceptedValue && now - lastAcceptedTime < 1000L) {
             return false
         }
 
