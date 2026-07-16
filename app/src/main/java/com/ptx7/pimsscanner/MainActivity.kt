@@ -53,6 +53,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoSubmit: CheckBox
     private lateinit var autoScan: CheckBox
     private lateinit var scanNowButton: Button
+    private lateinit var scannerCollapseButton: Button
+    private lateinit var scannerSection: View
+
     private lateinit var cameraToggleButton: Button
     private lateinit var textSizeButton: Button
     private var webTextZoom = 90
@@ -69,6 +72,24 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        scannerCollapseButton = findViewById(R.id.scannerCollapseButton)
+        scannerSection = findViewById(R.id.scannerSection)
+
+        // Start with scanner controls minimized.
+        scannerSection.visibility = View.GONE
+        scannerCollapseButton.text = "SHOW SCANNER"
+
+        scannerCollapseButton.setOnClickListener {
+            if (scannerSection.visibility == View.VISIBLE) {
+                scannerSection.visibility = View.GONE
+                scannerCollapseButton.text = "SHOW SCANNER"
+            } else {
+                scannerSection.visibility = View.VISIBLE
+                scannerCollapseButton.text = "HIDE SCANNER"
+            }
+        }
+
 
         previewView = findViewById(R.id.previewView)
         webView = findViewById(R.id.webView)
@@ -319,6 +340,14 @@ class MainActivity : ComponentActivity() {
 
     private fun configureWebView() {
         webView.settings.javaScriptEnabled = true
+
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.setSupportZoom(true)
+        webView.settings.builtInZoomControls = true
+        webView.settings.displayZoomControls = false
+        webView.setInitialScale(10)
+
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
         webView.settings.userAgentString =
@@ -329,6 +358,8 @@ class MainActivity : ComponentActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
+                view?.setInitialScale(10)
+
                 statusText.text = "Integrated PIMS loaded"
             }
         }
