@@ -70,13 +70,6 @@ class MainActivity : Activity() {
 
     private fun scanCode() {
         val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(
-                Barcode.FORMAT_QR_CODE,
-                Barcode.FORMAT_DATA_MATRIX,
-                Barcode.FORMAT_CODE_128,
-                Barcode.FORMAT_CODE_39
-            )
-            .enableAutoZoom()
             .build()
 
         val scanner = GmsBarcodeScanning.getClient(this, options)
