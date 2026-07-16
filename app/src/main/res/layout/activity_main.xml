@@ -27,6 +27,13 @@
             android:text="PIMS 90%" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/cameraToggleButton"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:text="HIDE CAMERA"
+        android:textSize="12sp" />
+
     <androidx.camera.view.PreviewView
         android:id="@+id/previewView"
         android:layout_width="match_parent"

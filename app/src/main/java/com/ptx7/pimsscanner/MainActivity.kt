@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoSubmit: CheckBox
     private lateinit var autoScan: CheckBox
     private lateinit var scanNowButton: Button
+    private lateinit var cameraToggleButton: Button
     private lateinit var textSizeButton: Button
     private var webTextZoom = 90
 
@@ -78,6 +79,7 @@ class MainActivity : ComponentActivity() {
         autoSubmit = findViewById(R.id.autoSubmit)
         autoScan = findViewById(R.id.autoScan)
         scanNowButton = findViewById(R.id.scanNowButton)
+        cameraToggleButton = findViewById(R.id.cameraToggleButton)
         textSizeButton = findViewById(R.id.textSizeButton)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -107,6 +109,16 @@ class MainActivity : ComponentActivity() {
             manualScanRequested = true
             statusText.visibility = View.VISIBLE
             statusText.text = "Ready for one scan..."
+        }
+
+        cameraToggleButton.setOnClickListener {
+            if (previewView.visibility == View.VISIBLE) {
+                previewView.visibility = View.GONE
+                cameraToggleButton.text = "SHOW CAMERA"
+            } else {
+                previewView.visibility = View.VISIBLE
+                cameraToggleButton.text = "HIDE CAMERA"
+            }
         }
 
         webView.settings.textZoom = webTextZoom
