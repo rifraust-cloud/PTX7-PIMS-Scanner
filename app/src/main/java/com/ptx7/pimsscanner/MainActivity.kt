@@ -58,9 +58,18 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var cameraToggleButton: Button
     private lateinit var textSizeButton: Button
-    private var webTextZoom = 90
+    private lateinit var fullscreenButton: Button
+    private lateinit var zoomOutButton: Button
+    private lateinit var zoomInButton: Button
+    private lateinit var fitButton: Button
+    private lateinit var zoomText: TextView
+    private lateinit var appHeader: View
+    private lateinit var pimsHeader: View
+    private lateinit var zoomToolbar: View
 
-    private lateinit var cameraExecutor: ExecutorService
+    private var webPageScale = 10
+    private var pimsFullscreen = false
+private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
 
     private var lastScanValue: String = ""
@@ -78,15 +87,15 @@ class MainActivity : ComponentActivity() {
 
         // Start with scanner controls minimized.
         scannerSection.visibility = View.GONE
-        scannerCollapseButton.text = "SHOW SCANNER"
+        scannerCollapseButton.text = "SCANNER  ▼"
 
         scannerCollapseButton.setOnClickListener {
             if (scannerSection.visibility == View.VISIBLE) {
                 scannerSection.visibility = View.GONE
-                scannerCollapseButton.text = "SHOW SCANNER"
+                scannerCollapseButton.text = "SCANNER  ▼"
             } else {
                 scannerSection.visibility = View.VISIBLE
-                scannerCollapseButton.text = "HIDE SCANNER"
+                scannerCollapseButton.text = "SCANNER  ▲"
             }
         }
 
@@ -102,6 +111,17 @@ class MainActivity : ComponentActivity() {
         scanNowButton = findViewById(R.id.scanNowButton)
         cameraToggleButton = findViewById(R.id.cameraToggleButton)
         textSizeButton = findViewById(R.id.textSizeButton)
+
+        fullscreenButton = findViewById(R.id.fullscreenButton)
+        zoomOutButton = findViewById(R.id.zoomOutButton)
+        zoomInButton = findViewById(R.id.zoomInButton)
+        fitButton = findViewById(R.id.fitButton)
+        zoomText = findViewById(R.id.zoomText)
+
+        appHeader = findViewById(R.id.appHeader)
+        pimsHeader = findViewById(R.id.pimsHeader)
+        zoomToolbar = findViewById(R.id.zoomToolbar)
+
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -142,15 +162,35 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        webView.settings.textZoom = webTextZoom
-        textSizeButton.text = "PIMS $webTextZoom%"
+        applyWebScale(10)
+
+        zoomOutButton.setOnClickListener {
+            applyWebScale((webPageScale - 10).coerceAtLeast(10))
+        }
+
+        zoomInButton.setOnClickListener {
+            applyWebScale((webPageScale + 10).coerceAtMost(100))
+        }
+
+        fitButton.setOnClickListener {
+            applyWebScale(50)
+        }
 
         textSizeButton.setOnClickListener {
-            webTextZoom -= 10
+            applyWebScale(
+                when (webPageScale) {
+                    10 -> 25
+                    25 -> 50
+                    50 -> 75
+                    75 -> 100
+                    else -> 10
+                }
+            )
+        }
 
-            if (webTextZoom < 50) {
-                webTextZoom = 100
-            }
+        fullscreenButton.setOnClickListener {
+            togglePimsFullscreen()
+        }
 
             webView.settings.textZoom = webTextZoom
             textSizeButton.text = "PIMS $webTextZoom%"
@@ -346,25 +386,61 @@ class MainActivity : ComponentActivity() {
         webView.settings.setSupportZoom(true)
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        webView.setInitialScale(10)
+        webView.setInitialScale(webPageScale)
 
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
         webView.settings.userAgentString =
-            webView.settings.userAgentString + " PTX7PimsScanner/0.3"
+            webView.settings.userAgentString + " PTX7PimsScanner/0.4"
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
-                view?.setInitialScale(10)
+                view?.setInitialScale(webPageScale)
 
                 statusText.text = "Integrated PIMS loaded"
             }
         }
 
         webView.webChromeClient = WebChromeClient()
+    }
+
+    private fun applyWebScale(percent: Int) {
+        webPageScale = percent.coerceIn(10, 100)
+
+        webView.setInitialScale(webPageScale)
+        zoomText.text = "$webPageScale%"
+        textSizeButton.text = "$webPageScale%"
+    }
+
+    private fun togglePimsFullscreen() {
+        pimsFullscreen = !pimsFullscreen
+
+        if (pimsFullscreen) {
+            appHeader.visibility = View.GONE
+            scannerCollapseButton.visibility = View.GONE
+            scannerSection.visibility = View.GONE
+            pimsHeader.visibility = View.GONE
+            zoomToolbar.visibility = View.GONE
+
+            fullscreenButton.text = "⛶"
+
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+
+        } else {
+            appHeader.visibility = View.VISIBLE
+            scannerCollapseButton.visibility = View.VISIBLE
+            pimsHeader.visibility = View.VISIBLE
+            zoomToolbar.visibility = View.VISIBLE
+
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_VISIBLE
+        }
     }
 
     private fun copyLastScan() {
