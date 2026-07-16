@@ -384,7 +384,6 @@ class MainActivity : ComponentActivity() {
         webView.settings.setSupportZoom(true)
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        webView.setInitialScale(webPageScale)
 
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
@@ -396,8 +395,7 @@ class MainActivity : ComponentActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
-                view?.setInitialScale(webPageScale)
-
+                applyWebScale(webPageScale)
                 statusText.text = "Integrated PIMS loaded"
             }
         }
@@ -408,9 +406,31 @@ class MainActivity : ComponentActivity() {
     private fun applyWebScale(percent: Int) {
         webPageScale = percent.coerceIn(10, 100)
 
-        webView.setInitialScale(webPageScale)
         zoomText.text = "$webPageScale%"
         textSizeButton.text = "$webPageScale%"
+
+        val scale = webPageScale / 100.0
+
+        val js = """
+            (function() {
+                var scale = $scale;
+
+                // Scale the actual PIMS webpage instead of the Android WebView.
+                document.documentElement.style.zoom = scale.toString();
+                document.body.style.zoom = scale.toString();
+
+                // Keep the usable webpage width proportional to the zoom.
+                document.documentElement.style.width =
+                    (100 / scale) + '%';
+
+                document.body.style.width =
+                    (100 / scale) + '%';
+
+                return 'PIMS page zoom applied: ' + scale;
+            })();
+        """.trimIndent()
+
+        webView.evaluateJavascript(js, null)
     }
 
     private fun togglePimsFullscreen() {
