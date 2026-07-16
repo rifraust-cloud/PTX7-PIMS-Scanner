@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pimsHeader: View
     private lateinit var zoomToolbar: View
 
-    private var webPageScale = 10
+    private var webPageScale = 75
     private var pimsFullscreen = false
 
     private lateinit var cameraExecutor: ExecutorService
@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        applyWebScale(10)
+        applyWebScale(75)
 
         zoomOutButton.setOnClickListener {
             applyWebScale((webPageScale - 10).coerceAtLeast(10))
@@ -174,19 +174,18 @@ class MainActivity : ComponentActivity() {
         }
 
         fitButton.setOnClickListener {
-            applyWebScale(50)
+            applyWebScale(75)
         }
 
         textSizeButton.setOnClickListener {
-            applyWebScale(
-                when (webPageScale) {
-                    10 -> 25
-                    25 -> 50
-                    50 -> 75
-                    75 -> 100
-                    else -> 10
+            val nextScale =
+                if (webPageScale >= 100) {
+                    10
+                } else {
+                    webPageScale + 10
                 }
-            )
+
+            applyWebScale(nextScale)
         }
 
         fullscreenButton.setOnClickListener {
