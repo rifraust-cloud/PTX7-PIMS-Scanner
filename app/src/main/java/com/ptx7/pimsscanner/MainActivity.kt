@@ -112,12 +112,12 @@ class MainActivity : ComponentActivity() {
         scannerSection = findViewById(R.id.scannerSection)
 
         // Start with scanner controls minimized.
-        scannerSection.visibility = View.GONE
+        scannerSection.visibility = View.INVISIBLE
         scannerCollapseButton.text = "PTX7 SCANNER   ▼"
 
         scannerCollapseButton.setOnClickListener {
             if (scannerSection.visibility == View.VISIBLE) {
-                scannerSection.visibility = View.GONE
+                scannerSection.visibility = View.INVISIBLE
                 scannerCollapseButton.text = "PTX7 SCANNER   ▼"
             } else {
                 scannerSection.visibility = View.VISIBLE
@@ -167,8 +167,6 @@ class MainActivity : ComponentActivity() {
         )
 
         configureWebView()
-        configurePinchZoom()
-
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
@@ -464,8 +462,7 @@ class MainActivity : ComponentActivity() {
             true
         )
 
-        webView.settings.builtInZoomControls =
-            false
+        webView.settings.builtInZoomControls = true
 
         webView.settings.displayZoomControls =
             false
@@ -482,7 +479,7 @@ class MainActivity : ComponentActivity() {
 
             webView.settings.userAgentString +
 
-            " PTX7PimsScanner/0.8"
+            " PTX7PimsScanner/0.9"
 
 
         /*
@@ -716,12 +713,46 @@ class MainActivity : ComponentActivity() {
 
 
 
+
+    /*
+     * Large-screen virtual PIMS viewport.
+     *
+     * Instead of rendering the phone version of PIMS and then trying
+     * to shrink it beyond WebView's zoom floor, PIMS is given a large
+     * desktop/tablet-sized CSS viewport first.
+     *
+     * Portrait  = 1800 CSS px
+     * Landscape = 2200 CSS px
+     *
+     * WebView can then show the complete large-screen layout at its
+     * minimum overview scale and users can pinch inward/outward
+     * naturally from there.
+     */
     private fun enablePimsPinchZoom() {
+
+        val virtualWidth =
+
+            if (
+                resources.configuration.orientation ==
+                Configuration.ORIENTATION_LANDSCAPE
+            ) {
+
+                2200
+
+            } else {
+
+                1800
+            }
+
 
         val javascript =
 
             """
             (function() {
+
+                var virtualWidth =
+                    $virtualWidth;
+
 
                 var viewport =
 
@@ -743,98 +774,125 @@ class MainActivity : ComponentActivity() {
                         'viewport';
 
 
-                    viewport.content =
-
-                        'width=device-width,' +
-
-                        'initial-scale=1.0,' +
-
-                        'minimum-scale=0.10,' +
-
-                        'maximum-scale=5.0,' +
-
-                        'user-scalable=yes';
-
-
                     document.head.appendChild(
                         viewport
                     );
-
-
-                    return viewport.content;
                 }
-
-
-                var content =
-
-                    viewport
-                        .getAttribute(
-                            'content'
-                        ) || '';
 
 
                 /*
-                 * Remove restrictions without changing width or initial scale.
+                 * Give PIMS a real large-screen layout width.
+                 *
+                 * This changes responsive breakpoints before zooming,
+                 * rather than attempting to shrink a phone layout.
                  */
-
-                content = content.replace(
-
-                    /user-scalable\s*=\s*no/gi,
-
-                    'user-scalable=yes'
-                );
-
-
-                content = content.replace(
-
-                    /maximum-scale\s*=\s*1(?:\.0+)?/gi,
-
-                    'maximum-scale=5.0'
-                );
-
-
-                if (
-                    !/user-scalable/i.test(
-                        content
-                    )
-                ) {
-
-                    content +=
-                        ', user-scalable=yes';
-                }
-
-
-                if (
-                    !/maximum-scale/i.test(
-                        content
-                    )
-                ) {
-
-                    content +=
-                        ', maximum-scale=5.0';
-                }
-
-
-                if (
-                    !/minimum-scale/i.test(
-                        content
-                    )
-                ) {
-
-                    content +=
-                        ', minimum-scale=0.10';
-                }
-
 
                 viewport.setAttribute(
 
                     'content',
 
-                    content
+                    'width=' +
+
+                    virtualWidth +
+
+                    ', initial-scale=1.0' +
+
+                    ', minimum-scale=0.05' +
+
+                    ', maximum-scale=5.0' +
+
+                    ', user-scalable=yes'
                 );
 
 
-                return content;
+                /*
+                 * Some PIMS pages use their own responsive containers.
+                 * Maintain the large layout canvas at the document level.
+                 */
+
+                var style =
+
+                    document.getElementById(
+
+                        'ptx7-desktop-viewport-style'
+
+                    );
+
+
+                if (!style) {
+
+                    style =
+
+                        document.createElement(
+                            'style'
+                        );
+
+
+                    style.id =
+
+                        'ptx7-desktop-viewport-style';
+
+
+                    document.head.appendChild(
+                        style
+                    );
+                }
+
+
+                style.textContent =
+
+                    'html, body {' +
+
+                    'min-width:' +
+
+                    virtualWidth +
+
+                    'px !important;' +
+
+                    '}';
+
+
+                document.documentElement
+                    .style
+                    .minWidth =
+
+                    virtualWidth +
+                    'px';
+
+
+                if (document.body) {
+
+                    document.body
+                        .style
+                        .minWidth =
+
+                        virtualWidth +
+                        'px';
+                }
+
+
+                /*
+                 * Tell responsive components to recalculate themselves.
+                 */
+
+                window.dispatchEvent(
+
+                    new Event(
+                        'resize'
+                    )
+                );
+
+
+                return JSON.stringify({
+
+                    virtualWidth:
+                        virtualWidth,
+
+                    contentWidth:
+                        document.documentElement
+                            .scrollWidth
+
+                });
 
             })();
             """.trimIndent()
@@ -842,10 +900,90 @@ class MainActivity : ComponentActivity() {
 
         webView.evaluateJavascript(
 
-            javascript,
+            javascript
 
-            null
-        )
+        ) {
+
+
+            /*
+             * Allow PIMS a moment to reflow into the new wide viewport,
+             * then move WebView to its true minimum overview scale.
+             */
+
+            webView.postDelayed({
+
+                zoomToMinimumOverview()
+
+            }, 400)
+        }
+    }
+
+
+
+    /*
+     * Repeatedly step outward until WebView reports that no additional
+     * native zoom-out level is available.
+     *
+     * Because the document now has a much larger virtual width,
+     * this minimum scale represents a much wider PIMS overview than
+     * the old phone-layout minimum.
+     */
+    private fun zoomToMinimumOverview(
+
+        remainingSteps: Int = 30
+
+    ) {
+
+        if (
+            remainingSteps <= 0
+        ) {
+
+            webView.scrollTo(
+                0,
+                0
+            )
+
+            return
+        }
+
+
+        if (
+            !webView.canZoomOut()
+        ) {
+
+            webView.scrollTo(
+                0,
+                0
+            )
+
+            return
+        }
+
+
+        val changed =
+
+            webView.zoomOut()
+
+
+        if (changed) {
+
+            webView.postDelayed({
+
+                zoomToMinimumOverview(
+
+                    remainingSteps - 1
+
+                )
+
+            }, 35)
+
+        } else {
+
+            webView.scrollTo(
+                0,
+                0
+            )
+        }
     }
 
 
@@ -875,54 +1013,17 @@ class MainActivity : ComponentActivity() {
 
 
 
+
     private fun fitToPage() {
 
-        if (
-
-            fitScale > 0f &&
-
-            webView.scale > 0f
-
-        ) {
-
-
-            val factor =
-
-                (
-                    fitScale /
-
-                    webView.scale
-                )
-                    .coerceIn(
-
-                        0.01f,
-
-                        100f
-                    )
-
-
-            webView.zoomBy(
-                factor
-            )
-        }
-
-
-        webView.scrollTo(
-
-            0,
-
-            0
-        )
-
-
-        updateZoomLabel()
+        enablePimsPinchZoom()
 
 
         webView.postDelayed({
 
             centerActivePimsContent()
 
-        }, 200)
+        }, 650)
     }
 
 
@@ -1941,7 +2042,7 @@ class MainActivity : ComponentActivity() {
         if (pimsFullscreen) {
             appHeader.visibility = View.GONE
             scannerCollapseButton.visibility = View.GONE
-            scannerSection.visibility = View.GONE
+            scannerSection.visibility = View.INVISIBLE
             pimsHeader.visibility = View.GONE
             zoomToolbar.visibility = View.GONE
 
