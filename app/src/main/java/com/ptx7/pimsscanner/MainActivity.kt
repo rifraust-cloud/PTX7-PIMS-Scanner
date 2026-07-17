@@ -74,6 +74,15 @@ class MainActivity : ComponentActivity() {
 
     private var manualScanFeedbackPending = false
 
+    /*
+     * True only when the floating camera button armed the scan.
+     *
+     * Floating camera behavior:
+     * capture one barcode -> send to PIMS -> submit automatically.
+     */
+    private var quickScanSubmitPending = false
+
+
 
     private lateinit var cameraToggleButton: Button
     private lateinit var textSizeButton: Button
@@ -374,6 +383,13 @@ class MainActivity : ComponentActivity() {
         manualScanFeedbackPending =
             true
 
+        /*
+         * The floating camera is a deliberate one-shot
+         * scan-and-submit action.
+         */
+        quickScanSubmitPending =
+            fromFloatingButton
+
 
         statusText.visibility =
             View.VISIBLE
@@ -601,24 +617,114 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
-    private fun handleSuccessfulScan(raw: String, format: Int) {
-        lastScanValue = raw
-        lastScanText.text = raw
-        copyToClipboard(raw)
 
-        val normalized = normalizeRetailBarcode(raw)
+    private fun handleSuccessfulScan(
 
-        statusText.text = """
-            ✓ SCANNED
-            Raw: $raw
-            Normalized: $normalized
-            Format: ${formatName(format)}
-        """.trimIndent()
+        raw: String,
 
-        if (autoSubmit.isChecked) {
-            sendLastScanToPage(submit = true)
+        format: Int
+
+    ) {
+
+        lastScanValue =
+            raw
+
+        lastScanText.text =
+            raw
+
+
+        /*
+         * Capture whether this scan came from the floating
+         * one-shot camera before clearing the flag.
+         */
+        val submitFromQuickCamera =
+
+            quickScanSubmitPending
+
+
+        quickScanSubmitPending =
+            false
+
+
+        /*
+         * The floating camera is now a direct scan-and-submit
+         * action rather than a clipboard-only action.
+         *
+         * Keep clipboard behavior for the normal scanner modes.
+         */
+        if (
+            !submitFromQuickCamera
+        ) {
+
+            copyToClipboard(
+                raw
+            )
+        }
+
+
+        val normalized =
+
+            normalizeRetailBarcode(
+                raw
+            )
+
+
+        statusText.text =
+
+            if (
+                submitFromQuickCamera
+            ) {
+
+                """
+                ✓ CAPTURED
+                Sending to PIMS...
+                """.trimIndent()
+
+            } else {
+
+                """
+                ✓ SCANNED
+                Raw: $raw
+                Normalized: $normalized
+                Format: ${formatName(format)}
+                """.trimIndent()
+            }
+
+
+        /*
+         * Give deliberate one-shot scans the shutter sound
+         * and vibration confirmation.
+         */
+        if (
+            manualScanFeedbackPending
+        ) {
+
+            manualScanFeedbackPending =
+                false
+
+            playManualScanFeedback()
+        }
+
+
+        /*
+         * Floating camera ALWAYS sends and submits.
+         *
+         * All other scan methods continue respecting
+         * the existing Auto Submit checkbox.
+         */
+        if (
+            submitFromQuickCamera
+            ||
+            autoSubmit.isChecked
+        ) {
+
+            sendLastScanToPage(
+                submit = true
+            )
         }
     }
+
+
 
     private fun normalizeRetailBarcode(raw: String): String {
         val digits = raw.filter { it.isDigit() }
