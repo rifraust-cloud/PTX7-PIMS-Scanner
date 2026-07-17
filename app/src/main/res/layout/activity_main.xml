@@ -5,6 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:fitsSystemWindows="true"
     android:background="#FFFFFF">
 
     <LinearLayout
@@ -21,11 +22,11 @@
     <Button
         android:id="@+id/scannerCollapseButton"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="60dp"
         android:minWidth="0dp"
         android:minHeight="0dp"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
         android:paddingTop="0dp"
         android:paddingBottom="0dp"
         android:gravity="center"
@@ -37,7 +38,7 @@
         android:text="PTX7 SCANNER   ▼"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:textSize="14sp" />
+        android:textSize="17sp" />
 
     <LinearLayout
         android:id="@+id/scannerSection"

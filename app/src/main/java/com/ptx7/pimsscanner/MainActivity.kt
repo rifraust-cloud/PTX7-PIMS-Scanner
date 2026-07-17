@@ -93,6 +93,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        /*
+         * Keep the clickable PTX7 app bar below Android's
+         * system status bar.
+         *
+         * The status bar itself belongs to Android and cannot
+         * receive taps for our scanner toggle.
+         */
+        window.statusBarColor =
+            android.graphics.Color.parseColor("#007A83")
+
+        window.navigationBarColor =
+            android.graphics.Color.BLACK
+
         setContentView(R.layout.activity_main)
 
         scannerCollapseButton = findViewById(R.id.scannerCollapseButton)
