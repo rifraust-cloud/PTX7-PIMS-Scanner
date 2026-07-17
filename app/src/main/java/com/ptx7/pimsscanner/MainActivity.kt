@@ -100,15 +100,15 @@ class MainActivity : ComponentActivity() {
 
         // Start with scanner controls minimized.
         scannerSection.visibility = View.GONE
-        scannerCollapseButton.text = "SCANNER  ▼"
+        scannerCollapseButton.text = "PTX7  ▼"
 
         scannerCollapseButton.setOnClickListener {
             if (scannerSection.visibility == View.VISIBLE) {
                 scannerSection.visibility = View.GONE
-                scannerCollapseButton.text = "SCANNER  ▼"
+                scannerCollapseButton.text = "PTX7  ▼"
             } else {
                 scannerSection.visibility = View.VISIBLE
-                scannerCollapseButton.text = "SCANNER  ▲"
+                scannerCollapseButton.text = "PTX7  ▲"
             }
         }
 
@@ -736,7 +736,7 @@ class MainActivity : ComponentActivity() {
 
                         'initial-scale=1.0,' +
 
-                        'minimum-scale=0.25,' +
+                        'minimum-scale=0.10,' +
 
                         'maximum-scale=5.0,' +
 
@@ -809,7 +809,7 @@ class MainActivity : ComponentActivity() {
                 ) {
 
                     content +=
-                        ', minimum-scale=0.25';
+                        ', minimum-scale=0.10';
                 }
 
 
@@ -853,7 +853,7 @@ class MainActivity : ComponentActivity() {
          */
 
         zoomText.text =
-            "PINCH"
+            ""
 
 
         textSizeButton.text =
