@@ -21,14 +21,23 @@
     <Button
         android:id="@+id/scannerCollapseButton"
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="48dp"
+        android:minWidth="0dp"
         android:minHeight="0dp"
-        android:padding="0dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="0dp"
+        android:paddingBottom="0dp"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
+        android:hapticFeedbackEnabled="true"
+        android:soundEffectsEnabled="true"
         android:backgroundTint="#007A83"
-        android:text="PTX7  ▼"
+        android:text="PTX7 SCANNER   ▼"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:textSize="13sp" />
+        android:textSize="14sp" />
 
     <LinearLayout
         android:id="@+id/scannerSection"

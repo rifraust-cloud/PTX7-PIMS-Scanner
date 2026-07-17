@@ -100,15 +100,15 @@ class MainActivity : ComponentActivity() {
 
         // Start with scanner controls minimized.
         scannerSection.visibility = View.GONE
-        scannerCollapseButton.text = "PTX7  ▼"
+        scannerCollapseButton.text = "PTX7 SCANNER   ▼"
 
         scannerCollapseButton.setOnClickListener {
             if (scannerSection.visibility == View.VISIBLE) {
                 scannerSection.visibility = View.GONE
-                scannerCollapseButton.text = "PTX7  ▼"
+                scannerCollapseButton.text = "PTX7 SCANNER   ▼"
             } else {
                 scannerSection.visibility = View.VISIBLE
-                scannerCollapseButton.text = "PTX7  ▲"
+                scannerCollapseButton.text = "PTX7 SCANNER   ▲"
             }
         }
 
