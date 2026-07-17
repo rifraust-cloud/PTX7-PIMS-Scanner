@@ -43,7 +43,7 @@
 
             android:layout_weight="1"
 
-            android:text="PTX7 PIMS Scanner"
+            android:text="PTX7 PIMS Scanner v0.8"
 
             android:textColor="#FFFFFF"
 

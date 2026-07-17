@@ -469,7 +469,7 @@ class MainActivity : ComponentActivity() {
 
             webView.settings.userAgentString +
 
-            " PTX7PimsScanner/0.7"
+            " PTX7PimsScanner/0.8"
 
 
         /*
@@ -647,20 +647,26 @@ class MainActivity : ComponentActivity() {
                                 .scaleFactor
                                 .coerceIn(
 
-                                    0.80f,
+                                    0.85f,
 
-                                    1.25f
+                                    1.15f
                                 )
 
 
                         if (
+
                             factor.isFinite() &&
+
                             factor > 0f
+
                         ) {
 
                             webView.zoomBy(
                                 factor
                             )
+
+
+                            updateZoomLabel()
                         }
 
 
@@ -682,22 +688,21 @@ class MainActivity : ComponentActivity() {
 
 
             /*
-             * Return false so PIMS still receives normal taps and scrolling.
+             * Single-finger events continue to PIMS for normal tapping
+             * and scrolling.
              *
-             * The detector independently performs the zoom operation.
+             * Two-finger events belong to our pinch zoom handler.
              */
-            false
+
+            event.pointerCount > 1 ||
+
+            scaleGestureDetector
+                .isInProgress
         }
     }
 
 
 
-    /*
-     * Remove webpage settings that explicitly prevent zooming.
-     *
-     * Unlike v0.6, this does NOT force PIMS to width=1024.
-     * The existing responsive page width is preserved.
-     */
     private fun enablePimsPinchZoom() {
 
         val javascript =
@@ -840,6 +845,13 @@ class MainActivity : ComponentActivity() {
      */
     private fun updateZoomLabel() {
 
+        /*
+         * Do not display Android's raw WebView scale.
+         *
+         * The Samsung reports density-dependent values such as 3.75,
+         * which previously appeared as the misleading 375%.
+         */
+
         zoomText.text =
             "PINCH"
 
@@ -850,9 +862,6 @@ class MainActivity : ComponentActivity() {
 
 
 
-    /*
-     * Return to the scale captured when PIMS first loaded successfully.
-     */
     private fun fitToPage() {
 
         if (
