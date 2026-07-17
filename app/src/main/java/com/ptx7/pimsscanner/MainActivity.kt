@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -72,6 +73,9 @@ class MainActivity : ComponentActivity() {
 
     // WebView's natural overview scale.
     private var fitScale = 0f
+
+    // Last scale reported by WebView.
+    private var lastKnownWebScale = 1f
 
     // Prevent the FIT operation from being shown as manual zoom.
     private var restoringFit = false
@@ -226,6 +230,29 @@ class MainActivity : ComponentActivity() {
         fullscreenButton.setOnClickListener {
 
             togglePimsFullscreen()
+        }
+
+
+        /*
+         * Restore the current PIMS page after Activity recreation.
+         *
+         * On a normal fresh launch, automatically load Integrated PIMS so
+         * the user does not have to press the button first.
+         */
+        if (savedInstanceState != null) {
+
+            val restored =
+                webView.restoreState(
+                    savedInstanceState
+                )
+
+            if (restored == null) {
+                loadIntegratedPims()
+            }
+
+        } else {
+
+            loadIntegratedPims()
         }
 
 
@@ -468,23 +495,48 @@ class MainActivity : ComponentActivity() {
 
 
                     /*
-                     * Let the PIMS responsive layout settle before recording
-                     * its natural fitted scale.
+                     * Force PIMS to render against a wider desktop-style
+                     * viewport instead of switching into its oversized
+                     * narrow mobile layout.
+                     *
+                     * This still allows user pinch zoom.
                      */
 
+                    applyPimsViewport()
+
+
                     webView.postDelayed({
+
+                        /*
+                         * Capture the fitted scale after the viewport has
+                         * settled.
+                         *
+                         * We use this only as the baseline so the visible
+                         * percentage is relative:
+                         *
+                         * FIT = 100%
+                         *
+                         * rather than showing a raw density-dependent
+                         * value such as 375%.
+                         */
 
                         fitScale =
                             webView.scale
 
+                        lastKnownWebScale =
+                            fitScale
+
+
                         restoringFit =
                             true
 
+
                         zoomText.text =
-                            "FIT"
+                            "100%"
+
 
                         textSizeButton.text =
-                            "FIT"
+                            "100%"
 
 
                         injectPimsUiEnhancements()
@@ -492,12 +544,15 @@ class MainActivity : ComponentActivity() {
 
                         webView.postDelayed({
 
+                            centerActivePimsContent()
+
                             restoringFit =
                                 false
 
-                        }, 300)
+                        }, 250)
 
-                    }, 500)
+
+                    }, 650)
                 }
 
 
@@ -514,21 +569,32 @@ class MainActivity : ComponentActivity() {
                     )
 
 
-                    if (!restoringFit) {
+                    lastKnownWebScale =
+                        newScale
 
-                        val percent =
 
-                            (newScale * 100)
+                    if (
+                        !restoringFit &&
+                        fitScale > 0f
+                    ) {
+
+                        val relativePercent =
+
+                            (
+                                newScale /
+                                fitScale *
+                                100f
+                            )
                                 .toInt()
                                 .coerceAtLeast(1)
 
 
                         zoomText.text =
-                            "$percent%"
+                            "$relativePercent%"
 
 
                         textSizeButton.text =
-                            "$percent%"
+                            "$relativePercent%"
                     }
                 }
             }
@@ -541,33 +607,47 @@ class MainActivity : ComponentActivity() {
 
     private fun updateZoomLabel() {
 
-        val percent =
+        if (
+            fitScale <= 0f
+        ) {
 
-            (webView.scale * 100)
+            zoomText.text =
+                "FIT"
+
+            textSizeButton.text =
+                "FIT"
+
+            return
+        }
+
+
+        val relativePercent =
+
+            (
+                lastKnownWebScale /
+                fitScale *
+                100f
+            )
                 .toInt()
                 .coerceAtLeast(1)
 
 
         zoomText.text =
-            "$percent%"
+            "$relativePercent%"
 
 
         textSizeButton.text =
-            "$percent%"
+            "$relativePercent%"
     }
+
 
 
     private fun fitToPage() {
 
         if (
             fitScale <= 0f ||
-            webView.scale <= 0f
+            lastKnownWebScale <= 0f
         ) {
-
-            webView.scrollTo(
-                0,
-                0
-            )
 
             zoomText.text =
                 "FIT"
@@ -585,7 +665,10 @@ class MainActivity : ComponentActivity() {
 
         val factor =
 
-            (fitScale / webView.scale)
+            (
+                fitScale /
+                lastKnownWebScale
+            )
                 .coerceIn(
                     0.01f,
                     100f
@@ -597,11 +680,9 @@ class MainActivity : ComponentActivity() {
         )
 
 
-        /*
-         * Reset the base PIMS page to its natural origin.
-         *
-         * Popups and active controls are centered independently by CENTER.
-         */
+        lastKnownWebScale =
+            fitScale
+
 
         webView.scrollTo(
             0,
@@ -610,20 +691,23 @@ class MainActivity : ComponentActivity() {
 
 
         zoomText.text =
-            "FIT"
+            "100%"
 
 
         textSizeButton.text =
-            "FIT"
+            "100%"
 
 
         webView.postDelayed({
+
+            centerActivePimsContent()
 
             restoringFit =
                 false
 
         }, 300)
     }
+
 
 
     /*
@@ -638,6 +722,76 @@ class MainActivity : ComponentActivity() {
      * - creates a centered picker for standard HTML select controls;
      * - keeps focused fields visible above the keyboard.
      */
+
+    /*
+     * PIMS is designed primarily for a larger browser viewport.
+     *
+     * On the phone, width=device-width forces the responsive mobile layout,
+     * which makes the PIMS controls extremely large.
+     *
+     * Give PIMS a 1024 CSS-pixel workspace and then let WebView scale the
+     * whole page to the phone. Users can still pinch in and out.
+     */
+    private fun applyPimsViewport() {
+
+        val javascript =
+            """
+            (function() {
+
+                var viewport =
+
+                    document.querySelector(
+                        'meta[name="viewport"]'
+                    );
+
+
+                if (!viewport) {
+
+                    viewport =
+                        document.createElement(
+                            'meta'
+                        );
+
+
+                    viewport.name =
+                        'viewport';
+
+
+                    document.head.appendChild(
+                        viewport
+                    );
+                }
+
+
+                viewport.setAttribute(
+
+                    'content',
+
+                    'width=1024,' +
+
+                    'minimum-scale=0.10,' +
+
+                    'maximum-scale=5.0,' +
+
+                    'user-scalable=yes'
+                );
+
+
+                return viewport.content;
+
+            })();
+            """.trimIndent()
+
+
+        webView.evaluateJavascript(
+
+            javascript,
+
+            null
+        )
+    }
+
+
 
     private fun injectPimsUiEnhancements() {
 
@@ -1930,6 +2084,49 @@ class MainActivity : ComponentActivity() {
             statusText.text = "Camera permission denied"
         }
     }
+
+    override fun onSaveInstanceState(
+        outState: Bundle
+    ) {
+
+        webView.saveState(
+            outState
+        )
+
+        super.onSaveInstanceState(
+            outState
+        )
+    }
+
+
+    override fun onConfigurationChanged(
+        newConfig: Configuration
+    ) {
+
+        super.onConfigurationChanged(
+            newConfig
+        )
+
+
+        /*
+         * The Activity is preserved during phone rotation, so the current
+         * PIMS page remains open instead of returning to an empty WebView.
+         *
+         * Reapply the desktop viewport after the new dimensions settle.
+         */
+
+        webView.postDelayed({
+
+            applyPimsViewport()
+
+            injectPimsUiEnhancements()
+
+            centerActivePimsContent()
+
+        }, 350)
+    }
+
+
 
     override fun onDestroy() {
         super.onDestroy()
