@@ -66,9 +66,15 @@ class MainActivity : ComponentActivity() {
     private lateinit var appHeader: View
     private lateinit var pimsHeader: View
     private lateinit var zoomToolbar: View
+    private lateinit var centerButton: Button
 
-    private var webPageScale = 75
     private var pimsFullscreen = false
+
+    // WebView's natural overview scale.
+    private var fitScale = 0f
+
+    // Prevent the FIT operation from being shown as manual zoom.
+    private var restoringFit = false
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
@@ -122,6 +128,7 @@ class MainActivity : ComponentActivity() {
         appHeader = findViewById(R.id.appHeader)
         pimsHeader = findViewById(R.id.pimsHeader)
         zoomToolbar = findViewById(R.id.zoomToolbar)
+        centerButton = findViewById(R.id.centerButton)
 
 
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -163,32 +170,61 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        applyWebScale(75)
+        /*
+         * PIMS now uses WebView's native zoom instead of CSS document zoom.
+         * CSS zoom was changing the webpage dimensions and causing the
+         * off-center scrolling behavior.
+         */
 
         zoomOutButton.setOnClickListener {
-            applyWebScale((webPageScale - 10).coerceAtLeast(10))
+
+            restoringFit = false
+
+            webView.zoomOut()
+
+            webView.postDelayed({
+
+                updateZoomLabel()
+
+            }, 150)
         }
+
 
         zoomInButton.setOnClickListener {
-            applyWebScale((webPageScale + 10).coerceAtMost(100))
+
+            restoringFit = false
+
+            webView.zoomIn()
+
+            webView.postDelayed({
+
+                updateZoomLabel()
+
+            }, 150)
         }
+
 
         fitButton.setOnClickListener {
-            applyWebScale(75)
+
+            fitToPage()
         }
 
+
+        // The small PIM Console button is also a quick FIT shortcut.
         textSizeButton.setOnClickListener {
-            val nextScale =
-                if (webPageScale >= 100) {
-                    10
-                } else {
-                    webPageScale + 10
-                }
 
-            applyWebScale(nextScale)
+            fitToPage()
         }
+
+
+        centerButton.setOnClickListener {
+
+            centerActivePimsContent()
+        }
+
 
         fullscreenButton.setOnClickListener {
+
             togglePimsFullscreen()
         }
 
@@ -376,61 +412,1240 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun configureWebView() {
+
         webView.settings.javaScriptEnabled = true
+
+        /*
+         * Let WebView calculate the natural overview scale.
+         *
+         * We no longer modify document.body.style.zoom or page width.
+         * Those CSS changes were the cause of the distorted page size and
+         * excessive horizontal/vertical scrolling.
+         */
 
         webView.settings.useWideViewPort = true
         webView.settings.loadWithOverviewMode = true
+
         webView.settings.setSupportZoom(true)
+
+        // Keep pinch-to-zoom available without showing Android zoom buttons.
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
 
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
+
         webView.settings.userAgentString =
-            webView.settings.userAgentString + " PTX7PimsScanner/0.4"
+            webView.settings.userAgentString +
+                " PTX7PimsScanner/0.5"
+
+        // Zero allows WebView to calculate its initial overview scale.
+        webView.setInitialScale(0)
 
         CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                applyWebScale(webPageScale)
-                statusText.text = "Integrated PIMS loaded"
+        CookieManager.getInstance().setAcceptThirdPartyCookies(
+            webView,
+            true
+        )
+
+
+        webView.webViewClient =
+            object : WebViewClient() {
+
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    super.onPageFinished(
+                        view,
+                        url
+                    )
+
+                    statusText.text =
+                        "Integrated PIMS loaded"
+
+
+                    /*
+                     * Let the PIMS responsive layout settle before recording
+                     * its natural fitted scale.
+                     */
+
+                    webView.postDelayed({
+
+                        fitScale =
+                            webView.scale
+
+                        restoringFit =
+                            true
+
+                        zoomText.text =
+                            "FIT"
+
+                        textSizeButton.text =
+                            "FIT"
+
+
+                        injectPimsUiEnhancements()
+
+
+                        webView.postDelayed({
+
+                            restoringFit =
+                                false
+
+                        }, 300)
+
+                    }, 500)
+                }
+
+
+                override fun onScaleChanged(
+                    view: WebView?,
+                    oldScale: Float,
+                    newScale: Float
+                ) {
+
+                    super.onScaleChanged(
+                        view,
+                        oldScale,
+                        newScale
+                    )
+
+
+                    if (!restoringFit) {
+
+                        val percent =
+
+                            (newScale * 100)
+                                .toInt()
+                                .coerceAtLeast(1)
+
+
+                        zoomText.text =
+                            "$percent%"
+
+
+                        textSizeButton.text =
+                            "$percent%"
+                    }
+                }
             }
+
+
+        webView.webChromeClient =
+            WebChromeClient()
+    }
+
+
+    private fun updateZoomLabel() {
+
+        val percent =
+
+            (webView.scale * 100)
+                .toInt()
+                .coerceAtLeast(1)
+
+
+        zoomText.text =
+            "$percent%"
+
+
+        textSizeButton.text =
+            "$percent%"
+    }
+
+
+    private fun fitToPage() {
+
+        if (
+            fitScale <= 0f ||
+            webView.scale <= 0f
+        ) {
+
+            webView.scrollTo(
+                0,
+                0
+            )
+
+            zoomText.text =
+                "FIT"
+
+            textSizeButton.text =
+                "FIT"
+
+            return
         }
 
-        webView.webChromeClient = WebChromeClient()
+
+        restoringFit =
+            true
+
+
+        val factor =
+
+            (fitScale / webView.scale)
+                .coerceIn(
+                    0.01f,
+                    100f
+                )
+
+
+        webView.zoomBy(
+            factor
+        )
+
+
+        /*
+         * Reset the base PIMS page to its natural origin.
+         *
+         * Popups and active controls are centered independently by CENTER.
+         */
+
+        webView.scrollTo(
+            0,
+            0
+        )
+
+
+        zoomText.text =
+            "FIT"
+
+
+        textSizeButton.text =
+            "FIT"
+
+
+        webView.postDelayed({
+
+            restoringFit =
+                false
+
+        }, 300)
     }
 
-    private fun applyWebScale(percent: Int) {
-        webPageScale = percent.coerceIn(10, 100)
 
-        zoomText.text = "$webPageScale%"
-        textSizeButton.text = "$webPageScale%"
+    /*
+     * PIMS mobile interaction layer.
+     *
+     * This does not alter the main page dimensions.
+     *
+     * It:
+     * - centers dropdown/listbox overlays;
+     * - centers modal windows;
+     * - enlarges dropdown choices for touch;
+     * - creates a centered picker for standard HTML select controls;
+     * - keeps focused fields visible above the keyboard.
+     */
 
-        val scale = webPageScale / 100.0
+    private fun injectPimsUiEnhancements() {
 
-        val js = """
+        val javascript =
+            """
             (function() {
-                var scale = $scale;
 
-                // Scale the actual PIMS webpage instead of the Android WebView.
-                document.documentElement.style.zoom = scale.toString();
-                document.body.style.zoom = scale.toString();
+                if (
+                    window.__ptx7MobileUiInstalled
+                ) {
 
-                // Keep the usable webpage width proportional to the zoom.
-                document.documentElement.style.width =
-                    (100 / scale) + '%';
+                    if (
+                        window.__ptx7CenterActiveContent
+                    ) {
 
-                document.body.style.width =
-                    (100 / scale) + '%';
+                        window
+                            .__ptx7CenterActiveContent();
+                    }
 
-                return 'PIMS page zoom applied: ' + scale;
+                    return;
+                }
+
+
+                window.__ptx7MobileUiInstalled =
+                    true;
+
+
+
+                function isVisible(element) {
+
+                    if (!element) {
+
+                        return false;
+                    }
+
+
+                    var style =
+
+                        window
+                            .getComputedStyle(
+                                element
+                            );
+
+
+                    var rect =
+
+                        element
+                            .getBoundingClientRect();
+
+
+                    return (
+
+                        style.display !==
+                            'none' &&
+
+                        style.visibility !==
+                            'hidden' &&
+
+                        rect.width > 0 &&
+
+                        rect.height > 0
+                    );
+                }
+
+
+
+                /*
+                 * Find the currently visible PIMS popup.
+                 */
+
+                function getActiveOverlay() {
+
+                    var selectors = [
+
+                        '[role="listbox"]',
+
+                        '[role="dialog"]',
+
+                        '[role="menu"]',
+
+                        '[aria-modal="true"]'
+
+                    ];
+
+
+                    var candidates =
+                        [];
+
+
+                    selectors.forEach(
+
+                        function(selector) {
+
+
+                            Array
+                                .from(
+
+                                    document
+                                        .querySelectorAll(
+                                            selector
+                                        )
+                                )
+                                .forEach(
+
+                                    function(element) {
+
+
+                                        if (
+                                            isVisible(
+                                                element
+                                            )
+                                        ) {
+
+                                            candidates.push(
+                                                element
+                                            );
+                                        }
+                                    }
+                                );
+                        }
+                    );
+
+
+                    if (
+                        candidates.length === 0
+                    ) {
+
+                        return null;
+                    }
+
+
+                    return candidates[
+                        candidates.length - 1
+                    ];
+                }
+
+
+
+                /*
+                 * Center the current dropdown or popup.
+                 */
+
+                function centerOverlay() {
+
+                    var target =
+                        getActiveOverlay();
+
+
+                    if (!target) {
+
+                        return false;
+                    }
+
+
+                    var rect =
+
+                        target
+                            .getBoundingClientRect();
+
+
+                    /*
+                     * Do not rewrite a full-screen PIMS page.
+                     */
+
+                    if (
+
+                        rect.width >=
+                            window.innerWidth * 0.98 &&
+
+                        rect.height >=
+                            window.innerHeight * 0.95
+
+                    ) {
+
+                        return false;
+                    }
+
+
+                    target.style.setProperty(
+
+                        'position',
+
+                        'fixed',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'left',
+
+                        '50%',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'top',
+
+                        '50%',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'right',
+
+                        'auto',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'bottom',
+
+                        'auto',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'transform',
+
+                        'translate(-50%, -50%)',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'margin',
+
+                        '0',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'max-width',
+
+                        'calc(100vw - 24px)',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'max-height',
+
+                        '70vh',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'overflow-y',
+
+                        'auto',
+
+                        'important'
+                    );
+
+
+                    target.style.setProperty(
+
+                        'z-index',
+
+                        '2147483647',
+
+                        'important'
+                    );
+
+
+                    /*
+                     * Make dropdown choices easier to touch.
+                     */
+
+                    Array
+                        .from(
+
+                            target
+                                .querySelectorAll(
+
+                                    '[role="option"], li'
+
+                                )
+                        )
+                        .forEach(
+
+                            function(item) {
+
+
+                                item.style
+                                    .setProperty(
+
+                                        'min-height',
+
+                                        '48px',
+
+                                        'important'
+                                    );
+
+
+                                item.style
+                                    .setProperty(
+
+                                        'font-size',
+
+                                        '16px',
+
+                                        'important'
+                                    );
+                            }
+                        );
+
+
+                    return true;
+                }
+
+
+
+                /*
+                 * CENTER button behavior.
+                 *
+                 * Priority:
+                 * 1. Center an active popup.
+                 * 2. Center the currently focused control.
+                 * 3. Center the main PIMS content horizontally.
+                 */
+
+                window.__ptx7CenterActiveContent =
+                    function() {
+
+
+                        if (
+                            centerOverlay()
+                        ) {
+
+                            return;
+                        }
+
+
+                        var active =
+
+                            document
+                                .activeElement;
+
+
+                        if (
+
+                            active &&
+
+                            active !==
+                                document.body &&
+
+                            active.scrollIntoView
+
+                        ) {
+
+
+                            active.scrollIntoView({
+
+                                block:
+                                    'center',
+
+                                inline:
+                                    'center',
+
+                                behavior:
+                                    'smooth'
+
+                            });
+
+
+                            return;
+                        }
+
+
+                        var main =
+
+                            document.querySelector(
+
+                                'main, [role="main"]'
+
+                            );
+
+
+                        if (main) {
+
+
+                            var rect =
+
+                                main
+                                    .getBoundingClientRect();
+
+
+                            var desiredLeft =
+
+                                window.scrollX +
+
+                                rect.left +
+
+                                rect.width / 2 -
+
+                                window.innerWidth / 2;
+
+
+                            window.scrollTo({
+
+                                left:
+                                    Math.max(
+                                        0,
+                                        desiredLeft
+                                    ),
+
+                                top:
+                                    window.scrollY,
+
+                                behavior:
+                                    'smooth'
+                            });
+
+
+                            return;
+                        }
+
+
+                        var pageWidth =
+
+                            Math.max(
+
+                                document.documentElement
+                                    .scrollWidth,
+
+                                document.body
+                                    .scrollWidth
+                            );
+
+
+                        window.scrollTo({
+
+                            left:
+                                Math.max(
+
+                                    0,
+
+                                    (
+                                        pageWidth -
+
+                                        window.innerWidth
+                                    ) / 2
+                                ),
+
+                            top:
+                                window.scrollY,
+
+                            behavior:
+                                'smooth'
+                        });
+                    };
+
+
+
+                /*
+                 * Standard HTML SELECT controls:
+                 *
+                 * Replace the Android bottom picker with a centered,
+                 * touch-friendly webpage dialog.
+                 */
+
+                document.addEventListener(
+
+                    'click',
+
+                    function(event) {
+
+
+                        var target =
+                            event.target;
+
+
+                        if (
+                            !target ||
+                            !target.closest
+                        ) {
+
+                            return;
+                        }
+
+
+                        var select =
+
+                            target.closest(
+                                'select'
+                            );
+
+
+                        if (
+                            !select ||
+                            select.disabled ||
+                            select.multiple
+                        ) {
+
+                            return;
+                        }
+
+
+                        event.preventDefault();
+
+                        event.stopPropagation();
+
+                        event.stopImmediatePropagation();
+
+
+
+                        var existing =
+
+                            document
+                                .getElementById(
+
+                                    'ptx7-select-overlay'
+
+                                );
+
+
+                        if (existing) {
+
+                            existing.remove();
+                        }
+
+
+
+                        var backdrop =
+
+                            document
+                                .createElement(
+                                    'div'
+                                );
+
+
+                        backdrop.id =
+
+                            'ptx7-select-overlay';
+
+
+                        backdrop.style.cssText =
+
+                            'position:fixed;' +
+
+                            'inset:0;' +
+
+                            'background:rgba(0,0,0,0.45);' +
+
+                            'display:flex;' +
+
+                            'align-items:center;' +
+
+                            'justify-content:center;' +
+
+                            'padding:16px;' +
+
+                            'z-index:2147483647;';
+
+
+
+                        var card =
+
+                            document
+                                .createElement(
+                                    'div'
+                                );
+
+
+                        card.style.cssText =
+
+                            'width:min(92vw,520px);' +
+
+                            'max-height:72vh;' +
+
+                            'overflow:auto;' +
+
+                            'background:white;' +
+
+                            'border-radius:12px;' +
+
+                            'box-shadow:0 12px 40px rgba(0,0,0,.35);' +
+
+                            'padding:12px;';
+
+
+
+                        Array
+                            .from(
+                                select.options
+                            )
+                            .forEach(
+
+                                function(
+                                    option,
+                                    index
+                                ) {
+
+
+                                    if (
+                                        option.disabled
+                                    ) {
+
+                                        return;
+                                    }
+
+
+                                    var button =
+
+                                        document
+                                            .createElement(
+                                                'button'
+                                            );
+
+
+                                    button.type =
+                                        'button';
+
+
+                                    button.textContent =
+
+                                        option
+                                            .textContent
+                                            .trim();
+
+
+                                    button.style.cssText =
+
+                                        'display:block;' +
+
+                                        'width:100%;' +
+
+                                        'min-height:52px;' +
+
+                                        'margin:4px 0;' +
+
+                                        'padding:10px 14px;' +
+
+                                        'font-size:17px;' +
+
+                                        'text-align:left;' +
+
+                                        'background:' +
+
+                                        (
+                                            option.selected
+
+                                            ?
+
+                                            '#E6F4F5'
+
+                                            :
+
+                                            '#FFFFFF'
+                                        ) +
+
+                                        ';' +
+
+                                        'border:1px solid #D5DDE0;' +
+
+                                        'border-radius:8px;';
+
+
+
+                                    button.onclick =
+
+                                        function() {
+
+
+                                            var setter =
+
+                                                Object
+                                                    .getOwnPropertyDescriptor(
+
+                                                        window
+                                                            .HTMLSelectElement
+                                                            .prototype,
+
+                                                        'value'
+
+                                                    )
+                                                    .set;
+
+
+                                            setter.call(
+
+                                                select,
+
+                                                option.value
+                                            );
+
+
+                                            select.selectedIndex =
+                                                index;
+
+
+                                            select.dispatchEvent(
+
+                                                new Event(
+
+                                                    'input',
+
+                                                    {
+                                                        bubbles:
+                                                            true
+                                                    }
+                                                )
+                                            );
+
+
+                                            select.dispatchEvent(
+
+                                                new Event(
+
+                                                    'change',
+
+                                                    {
+                                                        bubbles:
+                                                            true
+                                                    }
+                                                )
+                                            );
+
+
+                                            backdrop.remove();
+
+
+                                            select.blur();
+                                        };
+
+
+                                    card.appendChild(
+                                        button
+                                    );
+                                }
+                            );
+
+
+
+                        backdrop.onclick =
+
+                            function(clickEvent) {
+
+
+                                if (
+                                    clickEvent.target ===
+                                        backdrop
+                                ) {
+
+                                    backdrop.remove();
+                                }
+                            };
+
+
+                        backdrop.appendChild(
+                            card
+                        );
+
+
+                        document.body.appendChild(
+                            backdrop
+                        );
+
+                    },
+
+                    true
+                );
+
+
+
+                /*
+                 * PIMS often creates custom dropdowns dynamically.
+                 * Watch for them and center them after they appear.
+                 */
+
+                var centerTimer =
+                    null;
+
+
+                var observer =
+
+                    new MutationObserver(
+
+                        function() {
+
+
+                            clearTimeout(
+                                centerTimer
+                            );
+
+
+                            centerTimer =
+
+                                setTimeout(
+
+                                    function() {
+
+                                        centerOverlay();
+
+                                    },
+
+                                    80
+                                );
+                        }
+                    );
+
+
+                observer.observe(
+
+                    document.documentElement,
+
+                    {
+
+                        childList:
+                            true,
+
+                        subtree:
+                            true
+
+                    }
+                );
+
+
+
+                /*
+                 * Also retry after a user opens a combobox.
+                 */
+
+                document.addEventListener(
+
+                    'click',
+
+                    function(event) {
+
+
+                        var target =
+                            event.target;
+
+
+                        if (
+                            !target ||
+                            !target.closest
+                        ) {
+
+                            return;
+                        }
+
+
+                        var trigger =
+
+                            target.closest(
+
+                                '[role="combobox"],' +
+
+                                '[aria-haspopup="listbox"],' +
+
+                                '[aria-haspopup="menu"]'
+
+                            );
+
+
+                        if (!trigger) {
+
+                            return;
+                        }
+
+
+                        setTimeout(
+                            centerOverlay,
+                            60
+                        );
+
+
+                        setTimeout(
+                            centerOverlay,
+                            180
+                        );
+
+
+                        setTimeout(
+                            centerOverlay,
+                            350
+                        );
+
+                    },
+
+                    true
+                );
+
+
+
+                /*
+                 * Keep active entry fields visible above the keyboard.
+                 */
+
+                document.addEventListener(
+
+                    'focusin',
+
+                    function(event) {
+
+
+                        var target =
+                            event.target;
+
+
+                        if (
+
+                            !target ||
+
+                            !target.matches ||
+
+                            !target.matches(
+
+                                'input, textarea'
+
+                            )
+
+                        ) {
+
+                            return;
+                        }
+
+
+                        setTimeout(
+
+                            function() {
+
+
+                                target.scrollIntoView({
+
+                                    block:
+                                        'center',
+
+                                    inline:
+                                        'center',
+
+                                    behavior:
+                                        'smooth'
+
+                                });
+
+                            },
+
+                            250
+                        );
+
+                    },
+
+                    true
+                );
+
+
+
+                window
+                    .__ptx7CenterActiveContent();
+
+
             })();
-        """.trimIndent()
+            """.trimIndent()
 
-        webView.evaluateJavascript(js, null)
+
+        webView.evaluateJavascript(
+
+            javascript,
+
+            null
+        )
     }
+
+
+    private fun centerActivePimsContent() {
+
+        webView.evaluateJavascript(
+
+            """
+            if (
+                window.__ptx7CenterActiveContent
+            ) {
+
+                window
+                    .__ptx7CenterActiveContent();
+            }
+            """.trimIndent(),
+
+            null
+        )
+    }
+
 
     private fun togglePimsFullscreen() {
         pimsFullscreen = !pimsFullscreen
