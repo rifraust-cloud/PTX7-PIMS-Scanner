@@ -1,5 +1,9 @@
 package com.ptx7.pimsscanner
 
+import android.widget.ImageButton
+import android.view.HapticFeedbackConstants
+import android.os.Build
+import android.media.MediaActionSound
 import android.Manifest
 import androidx.activity.ComponentActivity
 import android.content.ClipData
@@ -58,6 +62,19 @@ class MainActivity : ComponentActivity() {
     private lateinit var scannerCollapseButton: Button
     private lateinit var scannerSection: View
 
+    /*
+     * Small floating one-shot scanner control.
+     *
+     * It remains available while the main scanner drawer is collapsed,
+     * giving the user deliberate scan control without covering PIMS.
+     */
+    private lateinit var quickScanButton: ImageButton
+
+    private lateinit var scanFeedbackSound: MediaActionSound
+
+    private var manualScanFeedbackPending = false
+
+
     private lateinit var cameraToggleButton: Button
     private lateinit var textSizeButton: Button
     private lateinit var fullscreenButton: Button
@@ -111,17 +128,70 @@ class MainActivity : ComponentActivity() {
         scannerCollapseButton = findViewById(R.id.scannerCollapseButton)
         scannerSection = findViewById(R.id.scannerSection)
 
+        quickScanButton =
+            findViewById(
+                R.id.quickScanButton
+            )
+
+
+        /*
+         * Preload the sound once during Activity startup.
+         *
+         * The sound is played only for deliberate one-shot scans,
+         * not continuous Auto Scan activity.
+         */
+        scanFeedbackSound =
+
+            MediaActionSound().apply {
+
+                load(
+                    MediaActionSound.SHUTTER_CLICK
+                )
+            }
+
+
         // Start with scanner controls minimized.
         scannerSection.visibility = View.INVISIBLE
-        scannerCollapseButton.text = "PTX7 SCANNER   ▼"
+        scannerCollapseButton.text = "PIMS MOBILE   ▼"
+
+        quickScanButton.visibility =
+            View.VISIBLE
+
 
         scannerCollapseButton.setOnClickListener {
-            if (scannerSection.visibility == View.VISIBLE) {
-                scannerSection.visibility = View.INVISIBLE
-                scannerCollapseButton.text = "PTX7 SCANNER   ▼"
+
+            if (
+                scannerSection.visibility ==
+                View.VISIBLE
+            ) {
+
+                scannerSection.visibility =
+                    View.INVISIBLE
+
+                scannerCollapseButton.text =
+                    "PIMS MOBILE   ▼"
+
+                /*
+                 * Drawer is closed, so expose the compact
+                 * one-shot camera control over PIMS.
+                 */
+                quickScanButton.visibility =
+                    View.VISIBLE
+
             } else {
-                scannerSection.visibility = View.VISIBLE
-                scannerCollapseButton.text = "PTX7 SCANNER   ▲"
+
+                scannerSection.visibility =
+                    View.VISIBLE
+
+                scannerCollapseButton.text =
+                    "PIMS MOBILE   ▲"
+
+                /*
+                 * The full scanner controls already contain
+                 * the normal SCAN button.
+                 */
+                quickScanButton.visibility =
+                    View.GONE
             }
         }
 
@@ -173,9 +243,24 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
 
         scanNowButton.setOnClickListener {
-            manualScanRequested = true
-            statusText.visibility = View.VISIBLE
-            statusText.text = "Ready for one scan..."
+
+            armOneShotScan(
+                fromFloatingButton = false
+            )
+        }
+
+
+        /*
+         * Compact one-shot scanner.
+         *
+         * This does not enable continuous Auto Scan mode.
+         * It simply arms the next detected barcode.
+         */
+        quickScanButton.setOnClickListener {
+
+            armOneShotScan(
+                fromFloatingButton = true
+            )
         }
 
         cameraToggleButton.setOnClickListener {
@@ -269,6 +354,130 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+
+
+    /*
+     * Arms exactly one barcode capture.
+     *
+     * CameraX is already bound and analyzing in the background,
+     * so this only changes the acceptance state.
+     */
+    private fun armOneShotScan(
+
+        fromFloatingButton: Boolean
+
+    ) {
+
+        manualScanRequested =
+            true
+
+        manualScanFeedbackPending =
+            true
+
+
+        statusText.visibility =
+            View.VISIBLE
+
+        statusText.text =
+            "Ready for one scan..."
+
+
+        if (
+            fromFloatingButton
+        ) {
+
+            /*
+             * Small visual change while waiting for the barcode.
+             */
+            quickScanButton
+                .animate()
+                .alpha(0.62f)
+                .setDuration(100)
+                .start()
+
+
+            quickScanButton.performHapticFeedback(
+
+                HapticFeedbackConstants
+                    .KEYBOARD_TAP
+            )
+
+
+            Toast.makeText(
+
+                this,
+
+                "Ready for one barcode",
+
+                Toast.LENGTH_SHORT
+
+            ).show()
+        }
+    }
+
+
+
+    /*
+     * Confirmation for deliberate one-shot scans.
+     *
+     * Continuous Auto Scan does not use the shutter sound.
+     */
+    private fun playManualScanFeedback() {
+
+        if (
+            ::scanFeedbackSound.isInitialized
+        ) {
+
+            scanFeedbackSound.play(
+
+                MediaActionSound
+                    .SHUTTER_CLICK
+            )
+        }
+
+
+        val hapticType =
+
+            if (
+                Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.R
+            ) {
+
+                HapticFeedbackConstants
+                    .CONFIRM
+
+            } else {
+
+                HapticFeedbackConstants
+                    .LONG_PRESS
+            }
+
+
+        quickScanButton.performHapticFeedback(
+
+            hapticType
+        )
+
+
+        quickScanButton
+            .animate()
+            .alpha(1.0f)
+            .setDuration(120)
+            .start()
+
+
+        Toast.makeText(
+
+            this,
+
+            "Barcode captured",
+
+            Toast.LENGTH_SHORT
+
+        ).show()
+    }
+
+
 
     private fun startCamera() {
         statusText.text = "Starting CameraX scanner..."
@@ -479,7 +688,7 @@ class MainActivity : ComponentActivity() {
 
             webView.settings.userAgentString +
 
-            " PTX7PimsScanner/0.9"
+            " PIMSMobile/1.0"
 
 
         /*
@@ -2367,6 +2576,14 @@ class MainActivity : ComponentActivity() {
 
 
     override fun onDestroy() {
+
+        if (
+            ::scanFeedbackSound.isInitialized
+        ) {
+
+            scanFeedbackSound.release()
+        }
+
         super.onDestroy()
 
         barcodeScanner.close()
