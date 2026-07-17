@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.view.ScaleGestureDetector
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pimsHeader: View
     private lateinit var zoomToolbar: View
     private lateinit var centerButton: Button
+    private lateinit var scaleGestureDetector: ScaleGestureDetector
 
     private var pimsFullscreen = false
 
@@ -152,6 +154,7 @@ class MainActivity : ComponentActivity() {
         )
 
         configureWebView()
+        configurePinchZoom()
 
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
@@ -182,29 +185,17 @@ class MainActivity : ComponentActivity() {
 
         zoomOutButton.setOnClickListener {
 
-            restoringFit = false
-
             webView.zoomOut()
 
-            webView.postDelayed({
-
-                updateZoomLabel()
-
-            }, 150)
+            updateZoomLabel()
         }
 
 
         zoomInButton.setOnClickListener {
 
-            restoringFit = false
-
             webView.zoomIn()
 
-            webView.postDelayed({
-
-                updateZoomLabel()
-
-            }, 150)
+            updateZoomLabel()
         }
 
 
@@ -214,7 +205,6 @@ class MainActivity : ComponentActivity() {
         }
 
 
-        // The small PIM Console button is also a quick FIT shortcut.
         textSizeButton.setOnClickListener {
 
             fitToPage()
@@ -440,131 +430,154 @@ class MainActivity : ComponentActivity() {
 
     private fun configureWebView() {
 
-        webView.settings.javaScriptEnabled = true
+        webView.settings.javaScriptEnabled =
+            true
+
+        webView.settings.useWideViewPort =
+            true
+
+        webView.settings.loadWithOverviewMode =
+            true
 
         /*
-         * Let WebView calculate the natural overview scale.
+         * Programmatic zoom remains enabled.
          *
-         * We no longer modify document.body.style.zoom or page width.
-         * Those CSS changes were the cause of the distorted page size and
-         * excessive horizontal/vertical scrolling.
+         * Built-in WebView gesture handling is disabled because PIMS may
+         * consume multi-touch events before WebView processes them.
+         *
+         * Our ScaleGestureDetector below handles two-finger pinch directly.
          */
-
-        webView.settings.useWideViewPort = true
-        webView.settings.loadWithOverviewMode = true
-
-        webView.settings.setSupportZoom(true)
-
-        // Keep pinch-to-zoom available without showing Android zoom buttons.
-        webView.settings.builtInZoomControls = true
-        webView.settings.displayZoomControls = false
-
-        webView.settings.domStorageEnabled = true
-        webView.settings.databaseEnabled = true
-
-        webView.settings.userAgentString =
-            webView.settings.userAgentString +
-                " PTX7PimsScanner/0.5"
-
-        // Zero allows WebView to calculate its initial overview scale.
-        webView.setInitialScale(0)
-
-        CookieManager.getInstance().setAcceptCookie(true)
-
-        CookieManager.getInstance().setAcceptThirdPartyCookies(
-            webView,
+        webView.settings.setSupportZoom(
             true
         )
 
+        webView.settings.builtInZoomControls =
+            false
+
+        webView.settings.displayZoomControls =
+            false
+
+
+        webView.settings.domStorageEnabled =
+            true
+
+        webView.settings.databaseEnabled =
+            true
+
+
+        webView.settings.userAgentString =
+
+            webView.settings.userAgentString +
+
+            " PTX7PimsScanner/0.7"
+
+
+        /*
+         * Allow WebView to calculate its normal initial fit.
+         */
+        webView.setInitialScale(
+            0
+        )
+
+
+        CookieManager
+            .getInstance()
+            .setAcceptCookie(
+                true
+            )
+
+
+        CookieManager
+            .getInstance()
+            .setAcceptThirdPartyCookies(
+
+                webView,
+
+                true
+            )
+
 
         webView.webViewClient =
+
             object : WebViewClient() {
 
+
                 override fun onPageFinished(
+
                     view: WebView?,
+
                     url: String?
+
                 ) {
 
                     super.onPageFinished(
+
                         view,
+
                         url
                     )
 
+
                     statusText.text =
+
                         "Integrated PIMS loaded"
 
 
                     /*
-                     * Force PIMS to render against a wider desktop-style
-                     * viewport instead of switching into its oversized
-                     * narrow mobile layout.
+                     * Preserve PIMS's normal responsive width.
                      *
-                     * This still allows user pinch zoom.
+                     * Only remove restrictions that prevent zooming.
                      */
-
-                    applyPimsViewport()
+                    enablePimsPinchZoom()
 
 
                     webView.postDelayed({
 
                         /*
-                         * Capture the fitted scale after the viewport has
-                         * settled.
+                         * Capture the first successfully rendered PIMS scale
+                         * as the FIT baseline.
                          *
-                         * We use this only as the baseline so the visible
-                         * percentage is relative:
-                         *
-                         * FIT = 100%
-                         *
-                         * rather than showing a raw density-dependent
-                         * value such as 375%.
+                         * We do NOT display this raw Android scale value.
                          */
+                        if (
+                            fitScale <= 0f
+                        ) {
 
-                        fitScale =
-                            webView.scale
+                            fitScale =
+                                webView.scale
+                        }
+
 
                         lastKnownWebScale =
-                            fitScale
+                            webView.scale
 
 
-                        restoringFit =
-                            true
-
-
-                        zoomText.text =
-                            "100%"
-
-
-                        textSizeButton.text =
-                            "100%"
+                        updateZoomLabel()
 
 
                         injectPimsUiEnhancements()
 
 
-                        webView.postDelayed({
-
-                            centerActivePimsContent()
-
-                            restoringFit =
-                                false
-
-                        }, 250)
-
-
-                    }, 650)
+                    }, 500)
                 }
 
 
                 override fun onScaleChanged(
+
                     view: WebView?,
+
                     oldScale: Float,
+
                     newScale: Float
+
                 ) {
 
                     super.onScaleChanged(
+
                         view,
+
                         oldScale,
+
                         newScale
                     )
 
@@ -573,168 +586,122 @@ class MainActivity : ComponentActivity() {
                         newScale
 
 
-                    if (
-                        !restoringFit &&
-                        fitScale > 0f
-                    ) {
-
-                        val relativePercent =
-
-                            (
-                                newScale /
-                                fitScale *
-                                100f
-                            )
-                                .toInt()
-                                .coerceAtLeast(1)
-
-
-                        zoomText.text =
-                            "$relativePercent%"
-
-
-                        textSizeButton.text =
-                            "$relativePercent%"
-                    }
+                    /*
+                     * Never expose Android's density-based raw scale.
+                     *
+                     * On the Samsung this is where values such as 375%
+                     * originated.
+                     */
+                    updateZoomLabel()
                 }
             }
 
 
         webView.webChromeClient =
+
             WebChromeClient()
     }
 
 
-    private fun updateZoomLabel() {
 
-        if (
-            fitScale <= 0f
-        ) {
+    /*
+     * Explicit pinch zoom.
+     *
+     * This watches all touch events sent to the WebView but does not consume
+     * normal one-finger taps or scrolling.
+     */
+    private fun configurePinchZoom() {
 
-            zoomText.text =
-                "FIT"
+        scaleGestureDetector =
 
-            textSizeButton.text =
-                "FIT"
+            ScaleGestureDetector(
 
-            return
-        }
+                this,
+
+                object :
+
+                    ScaleGestureDetector
+                        .SimpleOnScaleGestureListener() {
 
 
-        val relativePercent =
+                    override fun onScaleBegin(
 
-            (
-                lastKnownWebScale /
-                fitScale *
-                100f
+                        detector: ScaleGestureDetector
+
+                    ): Boolean {
+
+                        return true
+                    }
+
+
+                    override fun onScale(
+
+                        detector: ScaleGestureDetector
+
+                    ): Boolean {
+
+
+                        val factor =
+
+                            detector
+                                .scaleFactor
+                                .coerceIn(
+
+                                    0.80f,
+
+                                    1.25f
+                                )
+
+
+                        if (
+                            factor.isFinite() &&
+                            factor > 0f
+                        ) {
+
+                            webView.zoomBy(
+                                factor
+                            )
+                        }
+
+
+                        return true
+                    }
+                }
             )
-                .toInt()
-                .coerceAtLeast(1)
 
 
-        zoomText.text =
-            "$relativePercent%"
+        webView.setOnTouchListener {
+                _,
+                event ->
 
 
-        textSizeButton.text =
-            "$relativePercent%"
-    }
-
-
-
-    private fun fitToPage() {
-
-        if (
-            fitScale <= 0f ||
-            lastKnownWebScale <= 0f
-        ) {
-
-            zoomText.text =
-                "FIT"
-
-            textSizeButton.text =
-                "FIT"
-
-            return
-        }
-
-
-        restoringFit =
-            true
-
-
-        val factor =
-
-            (
-                fitScale /
-                lastKnownWebScale
-            )
-                .coerceIn(
-                    0.01f,
-                    100f
+            scaleGestureDetector
+                .onTouchEvent(
+                    event
                 )
 
 
-        webView.zoomBy(
-            factor
-        )
-
-
-        lastKnownWebScale =
-            fitScale
-
-
-        webView.scrollTo(
-            0,
-            0
-        )
-
-
-        zoomText.text =
-            "100%"
-
-
-        textSizeButton.text =
-            "100%"
-
-
-        webView.postDelayed({
-
-            centerActivePimsContent()
-
-            restoringFit =
-                false
-
-        }, 300)
+            /*
+             * Return false so PIMS still receives normal taps and scrolling.
+             *
+             * The detector independently performs the zoom operation.
+             */
+            false
+        }
     }
 
 
 
     /*
-     * PIMS mobile interaction layer.
+     * Remove webpage settings that explicitly prevent zooming.
      *
-     * This does not alter the main page dimensions.
-     *
-     * It:
-     * - centers dropdown/listbox overlays;
-     * - centers modal windows;
-     * - enlarges dropdown choices for touch;
-     * - creates a centered picker for standard HTML select controls;
-     * - keeps focused fields visible above the keyboard.
+     * Unlike v0.6, this does NOT force PIMS to width=1024.
+     * The existing responsive page width is preserved.
      */
-
-    /*
-     * PIMS is designed primarily for a larger browser viewport.
-     *
-     * On the phone, width=device-width forces the responsive mobile layout,
-     * which makes the PIMS controls extremely large.
-     *
-     * Give PIMS a 1024 CSS-pixel workspace and then let WebView scale the
-     * whole page to the phone. Users can still pinch in and out.
-     */
-    private fun applyPimsViewport() {
+    private fun enablePimsPinchZoom() {
 
         val javascript =
+
             """
             (function() {
 
@@ -748,6 +715,7 @@ class MainActivity : ComponentActivity() {
                 if (!viewport) {
 
                     viewport =
+
                         document.createElement(
                             'meta'
                         );
@@ -757,9 +725,86 @@ class MainActivity : ComponentActivity() {
                         'viewport';
 
 
+                    viewport.content =
+
+                        'width=device-width,' +
+
+                        'initial-scale=1.0,' +
+
+                        'minimum-scale=0.25,' +
+
+                        'maximum-scale=5.0,' +
+
+                        'user-scalable=yes';
+
+
                     document.head.appendChild(
                         viewport
                     );
+
+
+                    return viewport.content;
+                }
+
+
+                var content =
+
+                    viewport
+                        .getAttribute(
+                            'content'
+                        ) || '';
+
+
+                /*
+                 * Remove restrictions without changing width or initial scale.
+                 */
+
+                content = content.replace(
+
+                    /user-scalable\s*=\s*no/gi,
+
+                    'user-scalable=yes'
+                );
+
+
+                content = content.replace(
+
+                    /maximum-scale\s*=\s*1(?:\.0+)?/gi,
+
+                    'maximum-scale=5.0'
+                );
+
+
+                if (
+                    !/user-scalable/i.test(
+                        content
+                    )
+                ) {
+
+                    content +=
+                        ', user-scalable=yes';
+                }
+
+
+                if (
+                    !/maximum-scale/i.test(
+                        content
+                    )
+                ) {
+
+                    content +=
+                        ', maximum-scale=5.0';
+                }
+
+
+                if (
+                    !/minimum-scale/i.test(
+                        content
+                    )
+                ) {
+
+                    content +=
+                        ', minimum-scale=0.25';
                 }
 
 
@@ -767,17 +812,11 @@ class MainActivity : ComponentActivity() {
 
                     'content',
 
-                    'width=1024,' +
-
-                    'minimum-scale=0.10,' +
-
-                    'maximum-scale=5.0,' +
-
-                    'user-scalable=yes'
+                    content
                 );
 
 
-                return viewport.content;
+                return content;
 
             })();
             """.trimIndent()
@@ -789,6 +828,79 @@ class MainActivity : ComponentActivity() {
 
             null
         )
+    }
+
+
+
+    /*
+     * We deliberately do not display a numeric zoom percentage.
+     *
+     * Android WebView scale values are affected by device density and caused
+     * the misleading 375% number.
+     */
+    private fun updateZoomLabel() {
+
+        zoomText.text =
+            "PINCH"
+
+
+        textSizeButton.text =
+            "FIT"
+    }
+
+
+
+    /*
+     * Return to the scale captured when PIMS first loaded successfully.
+     */
+    private fun fitToPage() {
+
+        if (
+
+            fitScale > 0f &&
+
+            webView.scale > 0f
+
+        ) {
+
+
+            val factor =
+
+                (
+                    fitScale /
+
+                    webView.scale
+                )
+                    .coerceIn(
+
+                        0.01f,
+
+                        100f
+                    )
+
+
+            webView.zoomBy(
+                factor
+            )
+        }
+
+
+        webView.scrollTo(
+
+            0,
+
+            0
+        )
+
+
+        updateZoomLabel()
+
+
+        webView.postDelayed({
+
+            centerActivePimsContent()
+
+        }, 200)
     }
 
 
@@ -2117,7 +2229,10 @@ class MainActivity : ComponentActivity() {
 
         webView.postDelayed({
 
-            applyPimsViewport()
+            webView.requestLayout()
+            webView.invalidate()
+
+            enablePimsPinchZoom()
 
             injectPimsUiEnhancements()
 
