@@ -1,0 +1,883 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set +H
+
+SOURCE="/workspaces/PTX7-PIMS-Scanner"
+TARGET="/workspaces/Supply-Mobile"
+
+if [[ ! -d "$SOURCE" ]]; then
+  echo "ERROR: PIMS Mobile project not found at $SOURCE"
+  exit 1
+fi
+
+if [[ -d "$TARGET" ]]; then
+  echo "ERROR: $TARGET already exists. Move or remove it first."
+  exit 1
+fi
+
+cp -a "$SOURCE" "$TARGET"
+cd "$TARGET"
+rm -rf .git .gradle build app/build
+rm -rf app/src/main/java/com/ptx7/pimsscanner
+mkdir -p app/src/main/java/com/ptx7/supplymobile
+mkdir -p app/src/main/res/values
+
+python3 <<'PY'
+from pathlib import Path
+import re
+
+gradle = Path("app/build.gradle.kts")
+text = gradle.read_text(encoding="utf-8")
+text = re.sub(r'namespace\s*=\s*"[^"]+"', 'namespace = "com.ptx7.supplymobile"', text)
+text = re.sub(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "com.ptx7.supplymobile"', text)
+text = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 1', text)
+text = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "1.0.0"', text)
+gradle.write_text(text, encoding="utf-8")
+
+manifest = Path("app/src/main/AndroidManifest.xml")
+text = manifest.read_text(encoding="utf-8")
+text = re.sub(r'android:label="[^"]*"', 'android:label="@string/app_name"', text, count=1)
+
+for permission in [
+    '<uses-permission android:name="android.permission.INTERNET" />',
+    '<uses-permission android:name="android.permission.CAMERA" />'
+]:
+    if permission not in text:
+        pos = text.find('>') + 1
+        text = text[:pos] + '\n    ' + permission + text[pos:]
+
+manifest.write_text(text, encoding="utf-8")
+PY
+
+cat > app/src/main/res/values/strings.xml <<'EOF2'
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Supply Mobile</string>
+</resources>
+EOF2
+
+cat > app/src/main/java/com/ptx7/supplymobile/ApiClient.kt <<'EOF2'
+package com.ptx7.supplymobile
+
+import android.content.Context
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URLEncoder
+import java.net.URL
+import java.util.concurrent.Executors
+
+class ApiClient(private val context: Context) {
+
+    private val executor = Executors.newSingleThreadExecutor()
+    private val prefs = context.getSharedPreferences("supply_mobile_settings", Context.MODE_PRIVATE)
+
+    fun getBaseUrl(): String = prefs.getString("api_url", "") ?: ""
+
+    fun setBaseUrl(value: String) {
+        prefs.edit().putString("api_url", value.trim()).apply()
+    }
+
+    fun get(
+        action: String,
+        params: Map<String, String> = emptyMap(),
+        callback: (Result<JSONObject>) -> Unit
+    ) {
+        executor.execute {
+            try {
+                val base = getBaseUrl()
+                require(base.isNotBlank()) { "Supply Mobile API URL is not configured." }
+
+                val query = buildList {
+                    add("action=" + URLEncoder.encode(action, "UTF-8"))
+                    params.forEach { (key, value) ->
+                        add(URLEncoder.encode(key, "UTF-8") + "=" + URLEncoder.encode(value, "UTF-8"))
+                    }
+                }.joinToString("&")
+
+                val url = base + if (base.contains("?")) "&" else "?" + query
+                callback(Result.success(JSONObject(request(url, "GET", null))))
+            } catch (error: Exception) {
+                callback(Result.failure(error))
+            }
+        }
+    }
+
+    fun post(payload: JSONObject, callback: (Result<JSONObject>) -> Unit) {
+        executor.execute {
+            try {
+                val base = getBaseUrl()
+                require(base.isNotBlank()) { "Supply Mobile API URL is not configured." }
+                callback(Result.success(JSONObject(request(base, "POST", payload.toString()))))
+            } catch (error: Exception) {
+                callback(Result.failure(error))
+            }
+        }
+    }
+
+    private fun request(url: String, method: String, body: String?): String {
+        var connection = URL(url).openConnection() as HttpURLConnection
+        connection.instanceFollowRedirects = true
+        connection.requestMethod = method
+        connection.connectTimeout = 20000
+        connection.readTimeout = 30000
+        connection.setRequestProperty("Accept", "application/json")
+
+        if (body != null) {
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.bufferedWriter().use { it.write(body) }
+        }
+
+        var code = connection.responseCode
+
+        if (code in 300..399) {
+            val redirect = connection.getHeaderField("Location")
+            if (!redirect.isNullOrBlank()) {
+                connection.disconnect()
+                connection = URL(redirect).openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 20000
+                connection.readTimeout = 30000
+                code = connection.responseCode
+            }
+        }
+
+        val stream = if (code in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream ?: connection.inputStream
+        }
+
+        val response = BufferedReader(InputStreamReader(stream)).use { it.readText() }
+        connection.disconnect()
+
+        if (code !in 200..299) {
+            throw IllegalStateException("API error $code: $response")
+        }
+
+        return response
+    }
+}
+EOF2
+
+cat > app/src/main/java/com/ptx7/supplymobile/MainActivity.kt <<'EOF2'
+package com.ptx7.supplymobile
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.media.MediaActionSound
+import android.os.Bundle
+import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.Space
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.Executors
+
+class MainActivity : ComponentActivity() {
+
+    companion object {
+        private const val NAVY = "#102F5B"
+        private const val TEAL = "#087F8C"
+        private const val GREEN = "#209447"
+        private const val BLUE = "#1764C0"
+        private const val ORANGE = "#E77808"
+        private const val RED = "#C62828"
+        private const val TEXT = "#152B49"
+        private const val MUTED = "#637083"
+        private const val BORDER = "#E1E7EE"
+        private const val BG = "#F7F9FC"
+    }
+
+    private lateinit var root: FrameLayout
+    private lateinit var contentHolder: FrameLayout
+    private lateinit var topBar: TextView
+    private lateinit var quickScanButton: ImageButton
+    private lateinit var scannerOverlay: LinearLayout
+    private lateinit var previewView: PreviewView
+    private lateinit var api: ApiClient
+
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val barcodeScanner = BarcodeScanning.getClient()
+    private var manualScanArmed = false
+    private var scanForAudit = false
+    private var lastAccepted = ""
+    private var lastAcceptedTime = 0L
+    private val shutter = MediaActionSound()
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startCamera() else toast("Camera permission is required for scanning.")
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.statusBarColor = Color.parseColor(NAVY)
+        api = ApiClient(this)
+        shutter.load(MediaActionSound.SHUTTER_CLICK)
+        buildShell()
+        showHome()
+        ensureCameraPermission()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        barcodeScanner.close()
+        cameraExecutor.shutdown()
+        shutter.release()
+    }
+
+    private fun buildShell() {
+        root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor(BG)) }
+
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        topBar = TextView(this).apply {
+            text = "SUPPLY MOBILE"
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            setBackgroundColor(Color.parseColor(TEAL))
+            setOnClickListener { showHome() }
+        }
+
+        page.addView(topBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)))
+
+        contentHolder = FrameLayout(this)
+        page.addView(contentHolder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        previewView = PreviewView(this)
+
+        scannerOverlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded("#FFFFFF", BORDER, 18)
+            elevation = dp(16).toFloat()
+            visibility = View.GONE
+            addView(previewView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(Button(this@MainActivity).apply {
+                text = "Close Scanner"
+                isAllCaps = false
+                setOnClickListener {
+                    visibility = View.GONE
+                    quickScanButton.visibility = View.VISIBLE
+                }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        }
+
+        root.addView(scannerOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(340), Gravity.TOP).apply {
+            topMargin = dp(70)
+            marginStart = dp(12)
+            marginEnd = dp(12)
+        })
+
+        quickScanButton = ImageButton(this).apply {
+            contentDescription = "Scan barcode"
+            setImageResource(android.R.drawable.ic_menu_camera)
+            setColorFilter(Color.WHITE)
+            background = rounded(TEAL, TEAL, 30)
+            elevation = dp(14).toFloat()
+            setOnClickListener {
+                manualScanArmed = true
+                scannerOverlay.visibility = View.VISIBLE
+                visibility = View.GONE
+            }
+        }
+
+        root.addView(quickScanButton, FrameLayout.LayoutParams(dp(60), dp(60), Gravity.END or Gravity.BOTTOM).apply {
+            marginEnd = dp(18)
+            bottomMargin = dp(22)
+        })
+
+        setContentView(root)
+    }
+
+    private fun showHome() {
+        topBar.text = "SUPPLY MOBILE"
+        quickScanButton.visibility = View.VISIBLE
+        scanForAudit = false
+
+        val page = pageColumn()
+        page.addView(text("Supply. Locate. Manage.", 16f, MUTED, false, Gravity.CENTER))
+        page.addView(space(20))
+        page.addView(dashboardCard())
+        page.addView(space(18))
+        page.addView(modeCard("✓", "DAILY AUDIT", "Scan in any order and update today's counts", GREEN) { showDailyAudit() })
+        page.addView(space(12))
+        page.addView(modeCard("⌕", "FIND AN ITEM", "Search or scan PAC, item, location, or equipment", BLUE) { showSearch() })
+        page.addView(space(12))
+        page.addView(modeCard("⚙", "MANAGE", "Locations, equipment, changes, and system health", ORANGE) { showManage() })
+        showPage(page)
+    }
+
+    private fun dashboardCard(): View {
+        val card = card()
+        val main = text("Loading today's audit...", 24f, TEXT, true)
+        val detail = text("", 14f, MUTED)
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        card.addView(text("TODAY'S AUDIT", 13f, MUTED, true))
+        card.addView(space(8))
+        card.addView(main)
+        card.addView(space(8))
+        card.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)))
+        card.addView(space(8))
+        card.addView(detail)
+
+        api.get("dashboard") { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    if (json.optBoolean("ok")) {
+                        val complete = json.optInt("complete")
+                        val total = json.optInt("total")
+                        main.text = "$complete of $total complete"
+                        detail.text = "${json.optInt("remaining")} remaining · ${json.optInt("belowMinimum")} below minimum"
+                        progress.progress = json.optInt("progressPercent")
+                    } else {
+                        main.text = "Backend unavailable"
+                        detail.text = json.optString("error")
+                    }
+                }.onFailure {
+                    main.text = "Connect Supply Mobile"
+                    detail.text = it.message ?: "API unavailable"
+                }
+            }
+        }
+        return card
+    }
+
+    private fun showDailyAudit() {
+        topBar.text = "DAILY AUDIT"
+        scanForAudit = true
+        val page = pageColumn()
+        val summary = text("Loading...", 24f, TEXT, true)
+        page.addView(summary)
+        page.addView(space(14))
+
+        val search = input("Search PAC or item name")
+        page.addView(search)
+        page.addView(space(10))
+        page.addView(primaryButton("SEARCH ITEM", GREEN) {
+            val q = search.text.toString().trim()
+            if (q.isNotBlank()) searchItems(q, true)
+        })
+        page.addView(space(18))
+        page.addView(text("REMAINING ITEMS", 13f, MUTED, true))
+        val holder = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        page.addView(holder)
+        showPage(page)
+
+        api.get("dashboard") { result ->
+            runOnUiThread { result.onSuccess { json -> summary.text = "${json.optInt("complete")} / ${json.optInt("total")} complete · ${json.optInt("remaining")} remaining" } }
+        }
+
+        api.get("auditStatus", mapOf("filter" to "remaining")) { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    val items = json.optJSONArray("items") ?: JSONArray()
+                    holder.removeAllViews()
+                    for (i in 0 until minOf(items.length(), 25)) {
+                        val item = items.getJSONObject(i)
+                        holder.addView(simpleRow(item.optString("itemCode"), item.optString("description")) {
+                            loadItem(item.optString("itemCode"), true)
+                        })
+                        holder.addView(space(8))
+                    }
+                }.onFailure { holder.addView(text(it.message ?: "Unable to load audit.", 14f, RED)) }
+            }
+        }
+    }
+
+    private fun showSearch() {
+        topBar.text = "FIND AN ITEM"
+        scanForAudit = false
+        val page = pageColumn()
+        page.addView(text("What are you looking for?", 25f, TEXT, true))
+        page.addView(text("Try labels, boxes, tape, a PAC number, or scan a code.", 14f, MUTED))
+        page.addView(space(16))
+        val search = input("Search supplies...")
+        page.addView(search)
+        page.addView(space(10))
+        page.addView(primaryButton("SEARCH", BLUE) { searchItems(search.text.toString().trim(), false) })
+        showPage(page)
+    }
+
+    private fun searchItems(query: String, auditMode: Boolean) {
+        if (query.isBlank()) return
+        api.get("search", mapOf("q" to query)) { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    val results = json.optJSONArray("results") ?: JSONArray()
+                    val page = pageColumn()
+                    page.addView(text("${results.length()} results", 22f, TEXT, true))
+                    page.addView(space(12))
+                    for (i in 0 until results.length()) {
+                        val item = results.getJSONObject(i).getJSONObject("item")
+                        page.addView(simpleRow(item.optString("itemCode"), item.optString("description")) {
+                            showItemDetail(item, auditMode)
+                        })
+                        page.addView(space(8))
+                    }
+                    showPage(page)
+                }.onFailure { toast(it.message ?: "Search failed.") }
+            }
+        }
+    }
+
+    private fun loadItem(code: String, auditMode: Boolean) {
+        api.get("item", mapOf("code" to code)) { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    if (json.optBoolean("ok")) showItemDetail(json.getJSONObject("item"), auditMode)
+                    else toast(json.optString("error"))
+                }.onFailure { toast(it.message ?: "Unable to load item.") }
+            }
+        }
+    }
+
+    private fun showItemDetail(item: JSONObject, auditMode: Boolean) {
+        val page = pageColumn()
+        val code = item.optString("itemCode")
+        page.addView(text(item.optString("description"), 26f, TEXT, true))
+        page.addView(text(code, 15f, BLUE, true))
+        page.addView(space(14))
+        page.addView(metric("Current", item.opt("currentCount")?.toString() ?: "—"))
+        page.addView(metric("Minimum", item.opt("minOnHand")?.toString() ?: "—"))
+        page.addView(metric("Maximum", item.opt("maxOnHand")?.toString() ?: "—"))
+        page.addView(text(item.optString("stockStatus"), 15f, statusColor(item.optString("stockStatus")), true))
+
+        val locations = item.optJSONArray("locations") ?: JSONArray()
+        if (locations.length() > 0) {
+            page.addView(space(16))
+            page.addView(text("STORED AT", 13f, MUTED, true))
+            for (i in 0 until locations.length()) {
+                page.addView(text(locationLabel(locations.getJSONObject(i)), 16f, TEXT, true))
+            }
+        }
+
+        val equipment = item.optJSONArray("equipment") ?: JSONArray()
+        if (equipment.length() > 0) {
+            page.addView(space(16))
+            page.addView(text("USED WITH", 13f, MUTED, true))
+            for (i in 0 until equipment.length()) {
+                page.addView(text(equipment.getJSONObject(i).optString("Equipment Name"), 16f, TEXT))
+            }
+        }
+
+        if (auditMode) {
+            page.addView(space(18))
+            val audited = item.optBoolean("auditedToday")
+            if (audited) {
+                page.addView(text("✓ COMPLETE TODAY", 18f, GREEN, true))
+                page.addView(text("Today's count: ${item.opt("todayQuantity")}", 16f, TEXT))
+            }
+            page.addView(space(12))
+            val qty = input("Today's quantity")
+            val existing = item.opt("todayQuantity")?.toString()
+            if (!existing.isNullOrBlank() && existing != "null") qty.setText(existing)
+            page.addView(qty)
+            page.addView(space(10))
+            page.addView(primaryButton(if (audited) "UPDATE INVENTORY" else "SUBMIT COUNT", GREEN) {
+                val value = qty.text.toString().trim()
+                if (value.isBlank()) toast("Enter a quantity.") else updateAudit(code, value)
+            })
+        }
+
+        showPage(page)
+    }
+
+    private fun updateAudit(code: String, quantity: String) {
+        val payload = JSONObject()
+            .put("action", "updateAuditCount")
+            .put("itemCode", code)
+            .put("quantity", quantity.toDouble())
+            .put("device", android.os.Build.MODEL)
+
+        api.post(payload) { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    if (json.optBoolean("ok")) {
+                        shutter.play(MediaActionSound.SHUTTER_CLICK)
+                        quickScanButton.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                        toast(json.optString("message", "Inventory updated."))
+                        showDailyAudit()
+                    } else toast(json.optString("error"))
+                }.onFailure { toast(it.message ?: "Update failed.") }
+            }
+        }
+    }
+
+    private fun showManage() {
+        topBar.text = "MANAGE"
+        quickScanButton.visibility = View.GONE
+        val page = pageColumn()
+        page.addView(modeCard("✓", "SYSTEM HEALTH", "Connection, sync status, and pending updates", ORANGE) { showHealth() })
+        page.addView(space(10))
+        page.addView(modeCard("›", "LOCATIONS", "Rack, section, shelf, and item assignments", ORANGE) { showLocations() })
+        page.addView(space(10))
+        page.addView(modeCard("›", "EQUIPMENT", "Associate PACs with equipment", ORANGE) { showEquipment() })
+        page.addView(space(10))
+        page.addView(modeCard("›", "INVENTORY CHANGES", "Review source additions and changes", ORANGE) { showChanges() })
+        page.addView(space(10))
+        page.addView(modeCard("⚙", "CONNECTION SETTINGS", "Set the Supply Mobile API URL", ORANGE) { showSettings() })
+        showPage(page)
+    }
+
+    private fun showHealth() {
+        api.get("health") { result ->
+            runOnUiThread {
+                val page = pageColumn()
+                page.addView(text("SYSTEM HEALTH", 24f, TEXT, true))
+                result.onSuccess { json ->
+                    page.addView(metric("Items", json.optInt("itemCount").toString()))
+                    page.addView(metric("Pending source updates", json.optInt("pendingSourceUpdates").toString()))
+                    page.addView(metric("Last sync status", json.optString("lastSyncStatus")))
+                    page.addView(metric("Backend version", json.optString("version")))
+                }.onFailure { page.addView(text(it.message ?: "Health check failed.", 16f, RED)) }
+                showPage(page)
+            }
+        }
+    }
+
+    private fun showLocations() {
+        api.get("locations") { result ->
+            runOnUiThread {
+                val page = pageColumn()
+                page.addView(text("LOCATIONS", 24f, TEXT, true))
+                page.addView(primaryButton("ADD LOCATION", ORANGE) { showLocationWizard() })
+                page.addView(space(14))
+                result.onSuccess { json ->
+                    val arr = json.optJSONArray("locations") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val loc = arr.getJSONObject(i)
+                        page.addView(simpleRow(loc.optString("Location Code"), locationLabel(loc)) {})
+                        page.addView(space(8))
+                    }
+                }
+                showPage(page)
+            }
+        }
+    }
+
+    private fun showLocationWizard() {
+        val page = pageColumn()
+        page.addView(text("NEW STORAGE LOCATION", 24f, TEXT, true))
+        val rack = input("Rack number")
+        val section = input("Section number (optional)")
+        val shelf = input("Shelf number")
+        val friendly = input("Friendly shelf name: Top, Middle, Bottom...")
+        listOf(rack, section, shelf, friendly).forEach { page.addView(it); page.addView(space(8)) }
+        page.addView(primaryButton("SAVE LOCATION", ORANGE) {
+            api.post(JSONObject().put("action","saveLocation").put("rack",rack.text.toString()).put("section",section.text.toString()).put("shelfNumber",shelf.text.toString()).put("shelfFriendlyName",friendly.text.toString())) {
+                runOnUiThread { toast("Location saved."); showLocations() }
+            }
+        })
+        showPage(page)
+    }
+
+    private fun showEquipment() {
+        api.get("equipment") { result ->
+            runOnUiThread {
+                val page = pageColumn()
+                page.addView(text("EQUIPMENT", 24f, TEXT, true))
+                val name = input("New equipment name")
+                page.addView(name)
+                page.addView(space(8))
+                page.addView(primaryButton("ADD EQUIPMENT", ORANGE) {
+                    if (name.text.toString().isNotBlank()) {
+                        api.post(JSONObject().put("action","saveEquipment").put("equipmentName",name.text.toString())) { runOnUiThread { toast("Equipment saved."); showEquipment() } }
+                    }
+                })
+                page.addView(space(14))
+                result.onSuccess { json ->
+                    val arr = json.optJSONArray("equipment") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val eq = arr.getJSONObject(i)
+                        page.addView(simpleRow(eq.optString("Equipment ID"), eq.optString("Equipment Name")) {})
+                        page.addView(space(8))
+                    }
+                }
+                showPage(page)
+            }
+        }
+    }
+
+    private fun showChanges() {
+        api.get("changes") { result ->
+            runOnUiThread {
+                val page = pageColumn()
+                page.addView(text("INVENTORY CHANGES", 24f, TEXT, true))
+                result.onSuccess { json ->
+                    val arr = json.optJSONArray("changes") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val c = arr.getJSONObject(i)
+                        page.addView(simpleRow(c.optString("Change Type"), c.optString("Description")) {})
+                        page.addView(space(8))
+                    }
+                }
+                showPage(page)
+            }
+        }
+    }
+
+    private fun showSettings() {
+        val page = pageColumn()
+        page.addView(text("CONNECTION SETTINGS", 24f, TEXT, true))
+        val url = EditText(this).apply {
+            hint = "Google Apps Script /exec URL"
+            setText(api.getBaseUrl())
+            minLines = 3
+            background = rounded("#FFFFFF", BORDER, 14)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        page.addView(url)
+        page.addView(space(12))
+        page.addView(primaryButton("SAVE CONNECTION", TEAL) {
+            api.setBaseUrl(url.text.toString())
+            toast("Connection saved.")
+            showHome()
+        })
+        showPage(page)
+    }
+
+    private fun ensureCameraPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+        else permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    private fun startCamera() {
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val provider = future.get()
+            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            val analysis = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+
+            analysis.setAnalyzer(cameraExecutor) { proxy ->
+                val media = proxy.image
+                if (media == null) { proxy.close(); return@setAnalyzer }
+                val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
+                barcodeScanner.process(image)
+                    .addOnSuccessListener { barcodes ->
+                        if (manualScanArmed) {
+                            val barcode = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }
+                            if (barcode != null) acceptScan(barcode)
+                        }
+                    }
+                    .addOnCompleteListener { proxy.close() }
+            }
+
+            provider.unbindAll()
+            provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun acceptScan(barcode: Barcode) {
+        val raw = barcode.rawValue?.trim() ?: return
+        val now = System.currentTimeMillis()
+        if (raw == lastAccepted && now - lastAcceptedTime < 1500) return
+        lastAccepted = raw
+        lastAcceptedTime = now
+        manualScanArmed = false
+
+        runOnUiThread {
+            scannerOverlay.visibility = View.GONE
+            quickScanButton.visibility = View.VISIBLE
+            shutter.play(MediaActionSound.SHUTTER_CLICK)
+            quickScanButton.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        }
+
+        api.get("resolveScan", mapOf("value" to raw)) { result ->
+            runOnUiThread {
+                result.onSuccess { json ->
+                    when (json.optString("type")) {
+                        "item" -> showItemDetail(json.getJSONObject("item"), scanForAudit)
+                        "location" -> toast(locationLabel(json.getJSONObject("location")))
+                        "equipment" -> toast(json.getJSONObject("equipment").optString("Equipment Name"))
+                        else -> toast(json.optString("error", "Code not found."))
+                    }
+                }.onFailure { toast(it.message ?: "Scan lookup failed.") }
+            }
+        }
+    }
+
+    private fun showPage(view: View) {
+        contentHolder.removeAllViews()
+        val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.parseColor(BG)) }
+        scroll.addView(view)
+        contentHolder.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    private fun pageColumn() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(100))
+    }
+
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        background = rounded("#FFFFFF", BORDER, 18)
+        elevation = dp(2).toFloat()
+    }
+
+    private fun modeCard(icon: String, title: String, subtitle: String, accent: String, action: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = rounded("#FFFFFF", BORDER, 18)
+            elevation = dp(2).toFloat()
+            setOnClickListener { action() }
+        }
+        row.addView(text(icon, 28f, accent, true, Gravity.CENTER), LinearLayout.LayoutParams(dp(54), dp(54)))
+        val words = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14),0,0,0) }
+        words.addView(text(title, 17f, accent, true))
+        words.addView(text(subtitle, 14f, MUTED))
+        row.addView(words, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(text("›", 28f, TEXT, false, Gravity.CENTER))
+        return row
+    }
+
+    private fun simpleRow(title: String, subtitle: String, action: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = rounded("#FFFFFF", BORDER, 14)
+        addView(text(title, 15f, BLUE, true))
+        addView(text(subtitle, 15f, TEXT))
+        setOnClickListener { action() }
+    }
+
+    private fun metric(label: String, value: String): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0,dp(6),0,dp(6)) }
+        row.addView(text(label,15f,MUTED), LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f))
+        row.addView(text(value,16f,TEXT,true))
+        return row
+    }
+
+    private fun input(hintText: String) = EditText(this).apply {
+        hint = hintText
+        singleLine = true
+        background = rounded("#FFFFFF", BORDER, 14)
+        setPadding(dp(14),0,dp(14),0)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54))
+    }
+
+    private fun primaryButton(label: String, color: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        textSize = 16f
+        setTextColor(Color.WHITE)
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        background = rounded(color, color, 15)
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56))
+    }
+
+    private fun text(value: String, size: Float, color: String, bold: Boolean = false, gravityValue: Int = Gravity.START) = TextView(this).apply {
+        text = value
+        textSize = size
+        gravity = gravityValue
+        setTextColor(Color.parseColor(color))
+        if (bold) setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+    }
+
+    private fun space(height: Int) = Space(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+
+    private fun rounded(fill: String, stroke: String, radius: Int) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(radius).toFloat()
+        setColor(Color.parseColor(fill))
+        setStroke(dp(1), Color.parseColor(stroke))
+    }
+
+    private fun statusColor(status: String) = when (status) {
+        "BELOW MINIMUM" -> RED
+        "APPROACHING LOW" -> ORANGE
+        "GOOD" -> GREEN
+        else -> MUTED
+    }
+
+    private fun locationLabel(location: JSONObject): String {
+        val parts = mutableListOf<String>()
+        val rack = location.optString("Rack")
+        val section = location.optString("Section")
+        val friendly = location.optString("Shelf Friendly Name")
+        val shelf = location.optString("Shelf Number")
+        if (rack.isNotBlank()) parts.add("Rack $rack")
+        if (section.isNotBlank()) parts.add("Section $section")
+        if (friendly.isNotBlank()) parts.add(friendly) else if (shelf.isNotBlank()) parts.add("Shelf $shelf")
+        return parts.joinToString(" · ")
+    }
+
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+EOF2
+
+rm -f app/src/main/res/layout/activity_main.xml
+
+cat > README.md <<'EOF2'
+# Supply Mobile
+
+PIMS Mobile-inspired supply operations app.
+
+Build 1 includes:
+- Daily Audit
+- Universal scan lookup
+- Natural-language item search
+- Find an Item
+- Location foundation
+- Equipment foundation
+- Inventory change review
+- System Health
+- Floating one-shot scanner
+
+The app connects only to the Supply Mobile Apps Script API and does not depend on fixed Excel rows or columns.
+EOF2
+
+if [[ -d .github/workflows ]]; then
+  find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 |
+  while IFS= read -r -d '' file; do
+    sed -i \
+      -e 's/PTX7-PIMS-Scanner/Supply-Mobile/g' \
+      -e 's/PTX7 PIMS Scanner/Supply Mobile/g' \
+      -e 's/PIMS Mobile/Supply Mobile/g' \
+      "$file"
+  done
+fi
+
+git init -b main
+git add .
+git commit -m "Initial Supply Mobile operational build"
+
+echo
+echo "Supply Mobile created at $TARGET"
+echo "Next: create a private GitHub repo named Supply-Mobile and push this project."
