@@ -344,6 +344,12 @@
   // by PIMS underneath; this overlay forwards scans to PIMS and mirrors PIMS's
   // state in a big, simple UI. The operator stays here until Return to PIMS.
   var state = {
+    phase: 'NDC',       // 'NDC' (scan to look up) | 'PO' (select) | 'RECEIVE'
+    ndc: '',            // NDC searched
+    drug: '',           // drug name from PIMS result
+    pos: [],            // PO choices for the scanned NDC
+    poPollTimer: null,
+    poPollTries: 0,
     buffer: '',
     lastKeyAt: 0,
     timer: null,
@@ -489,44 +495,67 @@
   //   - After submit     -> brief success, then back to "SCAN MEDICATION"
   // ---------------------------------------------------------------------------
   function render() {
-    var po = currentPo();
-    var prog = currentProgress();
-    var detail = currentReceiveDetail();
+    var h = '';
 
-    var header = '';
-    if (po) {
-      header += '<div class="ptx7-rx-step">PO ' + esc(po) +
+    if (state.phase === 'NDC') {
+      // Phase 1: scan an NDC to look up its purchase orders.
+      h += '<div class="ptx7-rx-step">STEP 1 \u00b7 FIND PO</div>';
+      h += '<div class="ptx7-rx-head">Scan a medication NDC</div>';
+      h += scanBox('SCAN NDC');
+      h += '<div class="ptx7-rx-sub">Scan an NDC to look up its purchase orders.</div>';
+
+    } else if (state.phase === 'PO') {
+      // Phase 2: pick the correct PO from the lookup.
+      h += '<div class="ptx7-rx-step">STEP 2 \u00b7 SELECT PO</div>';
+      h += '<div class="ptx7-rx-head">' + esc(state.drug || ('NDC ' + state.ndc)) + '</div>';
+      h += '<div class="ptx7-rx-sub">Tap the correct purchase order.</div>';
+      if (!state.pos.length) {
+        h += '<div class="ptx7-rx-confirm bad">Looking up purchase orders\u2026' +
+          '<span class="meta">If none appear, scan the NDC again.</span></div>';
+      } else {
+        state.pos.forEach(function (p, i) {
+          h += '<button class="ptx7-rx-btn ptx7-rx-po" type="button" data-po="' + i + '">' +
+            esc(p.po) + '<span class="meta">Receivable: ' + esc(p.receivable) + '</span></button>';
+        });
+      }
+      h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-rescan">SCAN A DIFFERENT NDC</button>';
+
+    } else {
+      // Phase 3: receive loop inside the PO. Mirror the live PIMS state.
+      var po = currentPo();
+      var prog = currentProgress();
+      var detail = currentReceiveDetail();
+      h += '<div class="ptx7-rx-step">' + (po ? 'PO ' + esc(po) : 'RECEIVING') +
         (prog ? ' \u00b7 ' + esc(prog.received) + '/' + esc(prog.total) : '') + '</div>';
-    } else {
-      header += '<div class="ptx7-rx-step">RECEIVING</div>';
+      if (detail) {
+        h += '<div class="ptx7-rx-head">Scan this location</div>';
+        h += '<div class="ptx7-rx-success"><div class="loc">' +
+          esc(detail.location || 'SEE PIMS') + '</div>' +
+          '<div class="drug">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
+        h += scanBox('SCAN LOCATION');
+        h += '<div class="ptx7-rx-sub">Scan the shelf location to submit this receive.</div>';
+      } else {
+        h += '<div class="ptx7-rx-head">Scan a medication</div>';
+        h += scanBox('SCAN MEDICATION');
+        h += '<div class="ptx7-rx-sub">Scan each item, then its location. Stays in this PO.</div>';
+      }
     }
 
-    var h = header;
-    if (detail && detail.location) {
-      // A drug is scanned and PIMS is waiting for the location to submit.
-      h += '<div class="ptx7-rx-head">Scan this location</div>';
-      h += '<div class="ptx7-rx-success"><div class="loc">' + esc(detail.location) + '</div>' +
-        '<div class="drug">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
-      h += scanBox('SCAN LOCATION');
-      h += '<div class="ptx7-rx-sub">Scan the shelf location to submit this receive.</div>';
-    } else if (detail) {
-      // Drug scanned but no suggested location parsed; still prompt for it.
-      h += '<div class="ptx7-rx-head">Scan the location</div>';
-      h += '<div class="ptx7-rx-sub">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div>';
-      h += scanBox('SCAN LOCATION');
-    } else {
-      // Idle: ready for the next medication scan.
-      h += '<div class="ptx7-rx-head">Scan a medication</div>';
-      h += scanBox('SCAN MEDICATION');
-      h += '<div class="ptx7-rx-sub">Scan each item\u2019s barcode. Then scan its location.</div>';
-    }
     h += '<button class="ptx7-rx-btn ghost" type="button" id="ptx7-rx-exit">\u2190 RETURN TO PIMS</button>';
 
     body.innerHTML = h;
+
     var exit = document.getElementById('ptx7-rx-exit');
     if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
+    var rescan = document.getElementById('ptx7-rx-rescan');
+    if (rescan) rescan.onclick = function () { startNdcPhase(); };
+    [].slice.call(body.querySelectorAll('[data-po]')).forEach(function (btn) {
+      btn.onclick = function () {
+        var p = state.pos[Number(btn.getAttribute('data-po'))];
+        if (p) choosePo(p);
+      };
+    });
 
-    // Keep wedge focus on the capture input after each rebuild.
     if (root.style.display === 'block') {
       setTimeout(function () {
         try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
@@ -534,12 +563,58 @@
     }
   }
 
-  // Continuously mirror PIMS so the big UI tracks the live page (drug scanned,
-  // location submitted, PO changed) without the operator leaving Receive Mode.
+  function startNdcPhase() {
+    clearInterval(state.poPollTimer);
+    state.phase = 'NDC'; state.ndc = ''; state.drug = ''; state.pos = [];
+    render();
+  }
+
+  // Scan an NDC -> drive the PIMS Inventory search -> read Incoming Purchases.
+  function onNdcScan(raw) {
+    tone(true);
+    setDebug('NDC scan: ' + raw);
+    state.phase = 'PO'; state.pos = [];
+    state.ndc = scanToNdc11(raw) || digitsOnly(raw);
+    setPimsSearch(raw);                 // drive PIMS Inventory search + Submit
+    render();
+    clearInterval(state.poPollTimer); state.poPollTries = 0;
+    state.poPollTimer = setInterval(function () {
+      state.poPollTries++;
+      if (state.phase !== 'PO') { clearInterval(state.poPollTimer); return; }
+      var ndcNow = currentResultNdc(); if (ndcNow) state.ndc = ndcNow;
+      var drugNow = currentResultDrug(); if (drugNow) state.drug = drugNow;
+      var pos = readPurchaseOrders();
+      if (pos.length) { state.pos = pos; clearInterval(state.poPollTimer); render(); }
+      else if (state.poPollTries > 20) { clearInterval(state.poPollTimer); render(); }
+      else if (state.poPollTries % 3 === 0) { render(); }
+    }, 400);
+  }
+
+  function choosePo(p) {
+    tone(true);
+    setDebug('PO: ' + p.po);
+    // Open the PO's receiving page (prefer a real link; fall back to click).
+    try {
+      var fresh = readPurchaseOrders().find(function (x) { return x.po === p.po; });
+      var target = (fresh && fresh.target) || p.target;
+      var anchor = target && (target.matches && target.matches('a[href]') ? target :
+        (target.querySelector && target.querySelector('a[href]')) || (target.closest && target.closest('a[href]')));
+      if (anchor && anchor.href) { location.assign(anchor.href); }
+      else if (target && target.click) { target.click(); }
+    } catch (e) {}
+    state.phase = 'RECEIVE';
+    state.lastSignature = '';
+    setTimeout(render, 400);
+    setTimeout(render, 1200);
+  }
+
+  // Continuously mirror PIMS during the RECEIVE phase so the big UI tracks the
+  // live page (drug scanned, location submitted) without leaving Receive Mode.
   function startMirror() {
     clearInterval(state.mirrorTimer);
     state.mirrorTimer = setInterval(function () {
       if (root.style.display !== 'block') return;
+      if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
       var sig = currentPo() + '|' + (detail ? (detail.ndc + '|' + detail.location) : 'idle');
       if (sig !== state.lastSignature) {
@@ -587,12 +662,20 @@
   function handleScan(scanned) {
     scanned = String(scanned || '').trim();
     if (!scanned) return;
-    tone(true);
     setDebug('Scan: ' + scanned);
-    // Let PIMS do the actual receiving; mirror reflects the result shortly.
-    forwardScanToPims(scanned);
-    setTimeout(render, 300);
-    setTimeout(render, 900);
+    if (state.phase === 'NDC') {
+      onNdcScan(scanned);
+    } else if (state.phase === 'RECEIVE') {
+      // Inside a PO: forward the drug/location scan to PIMS's own listener.
+      tone(true);
+      forwardScanToPims(scanned);
+      setTimeout(render, 300);
+      setTimeout(render, 900);
+    } else {
+      // PO selection is tap-only; nudge the operator.
+      tone(false);
+      setDebug('Tap the correct PO above (or SCAN A DIFFERENT NDC).');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -632,6 +715,7 @@
     open: function () {
       window.__ptx7RxReopen = false;
       root.style.display = 'block';
+      state.phase = 'NDC'; state.ndc = ''; state.drug = ''; state.pos = [];
       state.lastSignature = '';
       capture.value = '';
       try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
@@ -644,6 +728,7 @@
     close: function () {
       root.style.display = 'none';
       clearInterval(state.mirrorTimer);
+      clearInterval(state.poPollTimer);
       if (window.PTX7Host && window.PTX7Host.onReceivingClosed) {
         try { window.PTX7Host.onReceivingClosed(); } catch (e) {}
       }
