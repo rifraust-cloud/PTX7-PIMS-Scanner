@@ -372,39 +372,35 @@
   var STYLE = document.createElement('style');
   STYLE.textContent =
     '#ptx7-rx-root *{box-sizing:border-box}' +
-    // Full-screen app shell. min() keeps it readable whether the page is at a
-    // phone viewport or the injected wide desktop viewport.
-    '#ptx7-rx-root{font-size:min(5vw,34px)}' +
-    '#ptx7-rx-bar{display:flex;align-items:center;min-height:12vh;background:#007A83;color:#fff;padding:0 3vw}' +
-    '#ptx7-rx-bar .back{background:rgba(255,255,255,.15);border:0;color:#fff;font-size:.8em;font-weight:900;padding:2.5vh 3vw;border-radius:12px}' +
-    '#ptx7-rx-bar .title{flex:1;text-align:center;font-size:1.2em;font-weight:900;letter-spacing:1px}' +
-    '#ptx7-rx-bar .spacer{width:16vw}' +
-    '#ptx7-rx-dots{display:flex;justify-content:center;gap:5vw;padding:3vh 0 1vh}' +
-    '.ptx7-rx-dot{width:1.6em;height:1.6em;border-radius:50%;background:#cdd5db;color:#59636b;font-weight:900;font-size:.7em;display:flex;align-items:center;justify-content:center}' +
-    '.ptx7-rx-dot.on{background:#007A83;color:#fff}' +
-    '#ptx7-rx-body{padding:1vh 5vw 4vh;max-width:none;margin:0}' +
-    '.ptx7-rx-step{text-align:center;color:#59636b;font-weight:900;font-size:.6em;letter-spacing:1px;margin:1.5vh 0 .5vh}' +
-    '.ptx7-rx-head{text-align:center;color:#172b3a;font-weight:900;font-size:1em;line-height:1.15;margin:.5vh 0}' +
-    '.ptx7-rx-sub{text-align:center;color:#59636b;font-size:.62em;margin:.5vh 0 2vh}' +
-    '.ptx7-rx-scanbox{border:5px solid #007A83;border-radius:22px;padding:5vh 4vw;text-align:center;margin:3vh 0}' +
-    '.ptx7-rx-scanbox .glyph{font-size:2em;letter-spacing:6px}' +
-    '.ptx7-rx-scanbox .label{color:#007A83;font-weight:900;font-size:1em;margin-top:2vh}' +
+    '#ptx7-rx-root{font-size:20px}' +
+    '#ptx7-rx-bar{display:flex;align-items:center;min-height:64px;background:#007A83;color:#fff;padding:10px 14px}' +
+    '#ptx7-rx-bar .back{background:rgba(255,255,255,.18);border:0;color:#fff;font-size:18px;font-weight:900;padding:14px 16px;border-radius:12px}' +
+    '#ptx7-rx-bar .title{flex:1;text-align:center;font-size:30px;font-weight:900;letter-spacing:1px}' +
+    '#ptx7-rx-bar .spacer{width:70px}' +
+    '#ptx7-rx-dots{display:none}' +
+    '#ptx7-rx-body{padding:16px 20px 28px;max-width:none;margin:0}' +
+    '.ptx7-rx-step{text-align:center;color:#59636b;font-weight:900;font-size:20px;letter-spacing:1px;margin:10px 0 6px}' +
+    '.ptx7-rx-head{text-align:center;color:#172b3a;font-weight:900;font-size:34px;line-height:1.15;margin:8px 0}' +
+    '.ptx7-rx-sub{text-align:center;color:#59636b;font-size:20px;margin:6px 0 16px}' +
+    '.ptx7-rx-scanbox{border:6px solid #007A83;border-radius:22px;padding:34px 14px;text-align:center;margin:20px 0}' +
+    '.ptx7-rx-scanbox .glyph{font-size:60px;letter-spacing:8px}' +
+    '.ptx7-rx-scanbox .label{color:#007A83;font-weight:900;font-size:32px;margin-top:14px}' +
     // Giant primary buttons: tall, chunky, easy to hit.
-    '.ptx7-rx-btn{display:block;width:100%;border:0;border-radius:20px;padding:3.4vh 4vw;margin:2.2vh 0;font-weight:900;font-size:1em;cursor:pointer;line-height:1.1}' +
+    '.ptx7-rx-btn{display:block;width:100%;border:0;border-radius:20px;padding:28px 18px;margin:18px 0;font-weight:900;font-size:30px;cursor:pointer;line-height:1.1}' +
     '.ptx7-rx-btn.primary{background:#007A83;color:#fff;box-shadow:0 6px 0 #005a61}' +
     '.ptx7-rx-btn.ghost{background:#fff;color:#005A61;border:4px solid #cdd5db}' +
-    '.ptx7-rx-btn.wait{background:#eceff2;color:#59636b}' +
-    '.ptx7-rx-btn .meta{display:block;font-size:.5em;font-weight:800;margin-top:1vh;opacity:.9}' +
+    '.ptx7-rx-btn.wait{background:#eceff2;color:#59636b;font-size:24px}' +
+    '.ptx7-rx-btn .meta{display:block;font-size:18px;font-weight:800;margin-top:8px;opacity:.9}' +
     '.ptx7-rx-po{background:#fff;color:#007A83;border:4px solid #007A83}' +
-    '.ptx7-rx-confirm{border-radius:18px;padding:3vh 4vw;margin:2.5vh 0;text-align:center;font-weight:900;font-size:.9em}' +
+    '.ptx7-rx-confirm{border-radius:18px;padding:22px 16px;margin:18px 0;text-align:center;font-weight:900;font-size:26px}' +
     '.ptx7-rx-confirm.ok{background:#e6f6eb;border:3px solid #087f3f;color:#087f3f}' +
     '.ptx7-rx-confirm.bad{background:#fff1f0;border:3px solid #b42318;color:#b42318}' +
-    '.ptx7-rx-confirm .meta{display:block;color:#172b3a;font-weight:700;font-size:.55em;margin-top:1vh}' +
-    '.ptx7-rx-success{background:#087f3f;color:#fff;border-radius:22px;padding:6vh 4vw;text-align:center;margin:3vh 0}' +
-    '.ptx7-rx-success .big{font-size:1.5em;font-weight:900}' +
-    '.ptx7-rx-success .loc{font-size:1.2em;font-weight:900;margin-top:2vh;letter-spacing:1px}' +
-    '.ptx7-rx-success .drug{font-size:.6em;margin-top:1.5vh}' +
-    '#ptx7-rx-foot{position:sticky;bottom:0;background:#f6f8f9;text-align:center;color:#59636b;font-size:.45em;padding:1.5vh 3vw}';
+    '.ptx7-rx-confirm .meta{display:block;color:#172b3a;font-weight:700;font-size:18px;margin-top:8px}' +
+    '.ptx7-rx-success{background:#087f3f;color:#fff;border-radius:22px;padding:34px 16px;text-align:center;margin:20px 0}' +
+    '.ptx7-rx-success .big{font-size:44px;font-weight:900}' +
+    '.ptx7-rx-success .loc{font-size:40px;font-weight:900;margin-top:14px;letter-spacing:1px}' +
+    '.ptx7-rx-success .drug{font-size:22px;margin-top:12px}' +
+    '#ptx7-rx-foot{position:sticky;bottom:0;background:#f6f8f9;text-align:center;color:#59636b;font-size:15px;padding:12px 14px}';
   root.appendChild(STYLE);
 
   var bar = document.createElement('div');
@@ -681,6 +677,36 @@
   // ---------------------------------------------------------------------------
   // Focused capture input (the PM86 wedge commits text into a focused field).
   // ---------------------------------------------------------------------------
+  // PIMS injects a wide (1800px) layout viewport, which shrinks our overlay
+  // when the browser scales the page down to the phone. While Receive Mode is
+  // open, switch the page viewport to device-width so the overlay renders at
+  // true phone scale; restore PIMS's viewport on close. PIMS reflows beneath
+  // us, which is fine — the mirror re-reads the page on a timer.
+  var savedViewportContent = null;
+  function getViewportMeta() {
+    var m = document.querySelector('meta[name="viewport"]');
+    if (!m) {
+      m = document.createElement('meta');
+      m.name = 'viewport';
+      (document.head || document.documentElement).appendChild(m);
+    }
+    return m;
+  }
+  function scaleToScreen() {
+    var m = getViewportMeta();
+    if (savedViewportContent === null) savedViewportContent = m.getAttribute('content') || '';
+    m.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+    // Large base font; element sizes are in px and already big at phone scale.
+    root.style.fontSize = '20px';
+  }
+  function restoreViewport() {
+    if (savedViewportContent !== null) {
+      var m = getViewportMeta();
+      m.setAttribute('content', savedViewportContent);
+      savedViewportContent = null;
+    }
+  }
+
   function focusCapture() {
     if (root.style.display !== 'block') return;
     try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
@@ -720,6 +746,7 @@
       capture.value = '';
       try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
       window.scrollTo(0, 0);
+      scaleToScreen();
       render();
       startMirror();
       setTimeout(focusCapture, 50);
@@ -729,6 +756,7 @@
       root.style.display = 'none';
       clearInterval(state.mirrorTimer);
       clearInterval(state.poPollTimer);
+      restoreViewport();
       if (window.PTX7Host && window.PTX7Host.onReceivingClosed) {
         try { window.PTX7Host.onReceivingClosed(); } catch (e) {}
       }
