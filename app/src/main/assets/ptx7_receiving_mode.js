@@ -541,6 +541,7 @@
         }
         h += scanBox('SCAN ITEM');
         h += '<div class="ptx7-rx-sub">Scan each item\u2019s 2D barcode, then its location.</div>';
+        h += '<div class="ptx7-rx-sub" style="font-size:12px;color:#8a93a0">inputs: ' + esc(probePimsInputs()) + '</div>';
       }
     }
 
@@ -623,63 +624,116 @@
       if (root.style.display !== 'block') return;
       if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
-      var sig = currentPo() + '|' + (detail ? (detail.ndc + '|' + detail.location) : 'idle');
+      var prog = currentProgress();
+      // Include progress + pending detail so the count never goes stale.
+      var sig = currentPo() + '|' +
+        (prog ? prog.received + '/' + prog.total : '?') + '|' +
+        (detail ? (detail.ndc + '@' + detail.location) : 'idle');
       if (sig !== state.lastSignature) {
+        var prev = state.lastSignature;
         state.lastSignature = sig;
+        // Confirmation feedback only on real PIMS transitions:
+        if (prev) {
+          var wasPending = /@/.test(prev.split('|')[2] || '');
+          var nowPending = !!detail;
+          if (!wasPending && nowPending) tone(true);       // item accepted -> location
+          else if (wasPending && !nowPending) tone(true);  // location submitted -> confirmed
+        }
         render();
       }
     }, 500);
   }
 
   // ---------------------------------------------------------------------------
-  // Forward a captured scan into the PIMS page.
+  // Deliver a captured scan into PIMS.
   //
-  // PIMS has its own global scan listener on the receiving page (a Zebra just
-  // scans and PIMS reacts). So we replay the scanned characters as key events
-  // into the document, then Enter, letting PIMS handle the drug/location.
+  // The PM86 does NOT deliver raw scans to the WebView unless a field is
+  // focused, so we captured the scan ourselves. PIMS's receiving listener is
+  // keystroke-based (a Zebra wedge works), so we must put the value into the
+  // element PIMS listens on. Synthetic body key events are untrusted and
+  // ignored, so instead we target an actual input: focus it, set its value via
+  // the native setter (so React/Cloudscape sees it), fire 'input', then Enter.
   // ---------------------------------------------------------------------------
-  function forwardScanToPims(scanned) {
-    var target = document.body || document.documentElement;
-    for (var i = 0; i < scanned.length; i++) {
-      var ch = scanned.charAt(i);
-      var code = scanned.charCodeAt(i);
-      ['keydown', 'keypress', 'keyup'].forEach(function (type) {
-        var ev;
-        try {
-          ev = new KeyboardEvent(type, {
-            key: ch, bubbles: true, cancelable: true,
-            keyCode: code, which: code, charCode: (type === 'keypress' ? code : 0)
-          });
-        } catch (e) { return; }
-        target.dispatchEvent(ev);
-      });
-    }
-    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
-      var ev;
-      try {
-        ev = new KeyboardEvent(type, {
-          key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
-          bubbles: true, cancelable: true
-        });
-      } catch (e) { return; }
-      target.dispatchEvent(ev);
+
+  // Enumerate real PIMS inputs (excluding our overlay), for delivery + probe.
+  function pimsInputs() {
+    return [].slice.call(document.querySelectorAll('input,textarea')).filter(function (el) {
+      return !(el.closest && el.closest('#ptx7-rx-root'));
     });
+  }
+
+  // Best candidate input for a scan on the current PIMS page.
+  function pimsScanInput() {
+    var ins = pimsInputs();
+    // 1) Whatever PIMS currently has focused.
+    var active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') &&
+        !(active.closest && active.closest('#ptx7-rx-root'))) return active;
+    // 2) A visible search/scan box by placeholder/aria.
+    var byPlaceholder = ins.filter(isVisible).find(function (el) {
+      var p = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
+      return /scan|product id|enter an ndc|dispensable|medication name|search/.test(p);
+    });
+    if (byPlaceholder) return byPlaceholder;
+    // 3) First enabled visible text input.
+    return ins.filter(isVisible).find(function (el) { return !el.disabled && !el.readOnly; }) || null;
+  }
+
+  function setNativeValue(el, value) {
+    var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+  }
+
+  // Deliver the full barcode payload into PIMS. Returns the method used.
+  function deliverScanToPims(payload) {
+    var el = pimsScanInput();
+    if (!el) return 'no-input';
+    try { el.focus(); } catch (e) {}
+    // Set the FULL payload (keep separators/serial/lot/exp — do not reduce to NDC).
+    setNativeValue(el, payload);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    // Enter on the input itself (not body) so PIMS's handler on that element fires.
+    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+      try {
+        el.dispatchEvent(new KeyboardEvent(type, {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
+        }));
+      } catch (e) {}
+    });
+    return 'input:' + (el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.id || el.name || el.tagName);
+  }
+
+  // Diagnostic probe: list PIMS inputs so we can see what PIMS listens on.
+  function probePimsInputs() {
+    var ins = pimsInputs();
+    if (!ins.length) return 'no PIMS inputs found';
+    return ins.slice(0, 6).map(function (el, i) {
+      var vis = isVisible(el) ? 'vis' : 'hid';
+      var ph = el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.id || el.name || el.tagName;
+      var foc = (el === document.activeElement) ? '*FOCUSED*' : '';
+      return (i + 1) + ':' + vis + ':' + ph + foc;
+    }).join(' | ');
   }
 
   function handleScan(scanned) {
     scanned = String(scanned || '').trim();
     if (!scanned) return;
-    setDebug('Scan: ' + scanned);
     if (state.phase === 'NDC') {
+      setDebug('NDC scan: ' + scanned);
       onNdcScan(scanned);
     } else if (state.phase === 'RECEIVE') {
-      // Inside a PO: forward the drug/location scan to PIMS's own listener.
-      tone(true);
-      forwardScanToPims(scanned);
-      setTimeout(render, 300);
-      setTimeout(render, 900);
+      // Deliver the FULL barcode payload to PIMS (item or location). Tone only
+      // reflects capture; real success is confirmed by the mirror reading PIMS.
+      var method = deliverScanToPims(scanned);
+      setDebug('deliver ' + scanned.length + 'ch via ' + method);
+      // Re-render shortly to reflect PIMS's resulting state.
+      setTimeout(render, 350);
+      setTimeout(render, 1000);
+      setTimeout(render, 1800);
     } else {
-      // PO selection is tap-only; nudge the operator.
       tone(false);
       setDebug('Tap the correct PO above (or SCAN A DIFFERENT NDC).');
     }
