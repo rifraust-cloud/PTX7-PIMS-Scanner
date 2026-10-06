@@ -213,10 +213,19 @@
   // Suggested Locations. Returns that info, or null when no drug is pending.
   function currentReceiveDetail() {
     var t = pageText();
-    if (!/Scan Location to submit receives/i.test(t)) return null;
+    // Detect the "waiting for location" state via either the panel header or
+    // the modal prompt PIMS shows after a drug scan.
+    if (!/Scan Location to submit receives/i.test(t) &&
+        !/Complete receive before proceeding to next NDC/i.test(t)) return null;
     var ndc = (t.match(/NDC:\s*(\d{9,14})/i) || [])[1] || '';
-    var loc = (t.match(/Suggested Locations?:\s*([A-Z0-9\-\/ ]+)/i) || [])[1] || '';
-    loc = loc.trim().split(/\s{2,}/)[0].trim();
+    // Prefer a real location-code match (MANFW0102-D-11 / CLDxxxx-x-xx), which
+    // is unambiguous; fall back to the labeled "Suggested Locations:" text.
+    var loc = (t.match(/\b((?:MAN(?:FW|WS)?|CLD)[A-Z]*\d{3,5}-[A-Z]-\d{1,2})\b/i) || [])[1] || '';
+    if (!loc) {
+      loc = (t.match(/Suggested Locations?:\s*([A-Z0-9\-\/ ]+)/i) || [])[1] || '';
+      loc = loc.trim().split(/\s{2,}/)[0].trim();
+    }
+    loc = loc.toUpperCase();
     // Drug heading: the detail panel repeats the drug name near the NDC.
     var drug = '';
     var dm = t.match(/([A-Z][A-Za-z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))\s*NDC:/i);
