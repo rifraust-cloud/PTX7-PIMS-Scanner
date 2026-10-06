@@ -2774,6 +2774,9 @@ class MainActivity : ComponentActivity() {
             toast("Receiving Mode script missing")
             return
         }
+        // Register the native<->JS bridge once so the overlay can tell us when
+        // it closes (so we stop intercepting hardware-scanner keys).
+        registerReceivingBridge()
         // The script sets this flag path so it opens immediately after install.
         webView.evaluateJavascript("window.__ptx7RxReopen = true;", null)
         webView.evaluateJavascript(js) {
@@ -2782,8 +2785,92 @@ class MainActivity : ComponentActivity() {
             )
         }
         receivingModeInstalled = true
+        receivingModeOpen = true
+        scanBuffer.setLength(0)
         statusText.text = "Receiving Mode"
     }
+
+    // ------------------------------------------------------------------
+    // Native hardware-scanner (keyboard-wedge) capture
+    //
+    // Many rugged imagers deliver scans as hardware key events to the
+    // Activity, NOT to the WebView DOM, so a JS keydown listener never sees
+    // them. We intercept them here, assemble the barcode, and forward the
+    // completed scan into the overlay via JavaScript.
+    // ------------------------------------------------------------------
+
+    @Volatile private var receivingModeOpen = false
+    private val scanBuffer = StringBuilder()
+    private var lastScanKeyAt = 0L
+    private var receivingBridgeRegistered = false
+
+    private fun registerReceivingBridge() {
+        if (receivingBridgeRegistered) return
+        webView.addJavascriptInterface(object {
+            @android.webkit.JavascriptInterface
+            fun onReceivingClosed() {
+                runOnUiThread {
+                    receivingModeOpen = false
+                    scanBuffer.setLength(0)
+                }
+            }
+        }, "PTX7Host")
+        receivingBridgeRegistered = true
+    }
+
+    private fun forwardScanToOverlay(scan: String) {
+        if (scan.isEmpty()) return
+        val quoted = JSONObject.quote(scan)
+        webView.evaluateJavascript(
+            "if (window.__ptx7Rx && window.__ptx7Rx.onHostScan) window.__ptx7Rx.onHostScan($quoted);",
+            null
+        )
+    }
+
+    private fun flushScanBuffer() {
+        if (scanBuffer.isEmpty()) return
+        val scan = scanBuffer.toString()
+        scanBuffer.setLength(0)
+        forwardScanToOverlay(scan)
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Only intercept while Receiving Mode is open; otherwise behave normally.
+        if (!receivingModeOpen) return super.dispatchKeyEvent(event)
+        if (event.action != android.view.KeyEvent.ACTION_DOWN) {
+            // Swallow matching UP events for keys we consume on DOWN.
+            return super.dispatchKeyEvent(event)
+        }
+
+        val keyCode = event.keyCode
+        // Terminators: Enter / Tab complete a scan.
+        if (keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+            keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            keyCode == android.view.KeyEvent.KEYCODE_TAB
+        ) {
+            flushScanBuffer()
+            return true
+        }
+
+        // Printable character from the wedge?
+        val ch = event.unicodeChar
+        if (ch != 0) {
+            val now = SystemClock.elapsedRealtime()
+            // A long pause means a new scan; reset the buffer.
+            if (now - lastScanKeyAt > 300L) scanBuffer.setLength(0)
+            lastScanKeyAt = now
+            scanBuffer.append(ch.toChar())
+            // Fallback flush for imagers that do not send Enter: a short pause
+            // after the last character closes the scan.
+            webView.removeCallbacks(scanFlushRunnable)
+            webView.postDelayed(scanFlushRunnable, 180L)
+            return true
+        }
+
+        return super.dispatchKeyEvent(event)
+    }
+
+    private val scanFlushRunnable = Runnable { flushScanBuffer() }
 
     override fun onDestroy() {
 

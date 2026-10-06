@@ -626,7 +626,14 @@
         try { window.PTX7Host.onReceivingClosed(); } catch (e) {}
       }
     },
-    isOpen: function () { return root.style.display === 'block'; }
+    isOpen: function () { return root.style.display === 'block'; },
+    // Called by the Android host when it has assembled a full hardware-wedge
+    // scan natively (dispatchKeyEvent). This is the reliable path when the
+    // imager's keystrokes never reach the WebView DOM.
+    onHostScan: function (scanned) {
+      if (root.style.display !== 'block') return;
+      handleScan(String(scanned || ''));
+    }
   };
 
   if (window.__ptx7RxReopen) window.__ptx7Rx.open();
