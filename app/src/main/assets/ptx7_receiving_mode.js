@@ -677,35 +677,11 @@
   // ---------------------------------------------------------------------------
   // Focused capture input (the PM86 wedge commits text into a focused field).
   // ---------------------------------------------------------------------------
-  // PIMS injects a wide (1800px) layout viewport, which shrinks our overlay
-  // when the browser scales the page down to the phone. While Receive Mode is
-  // open, switch the page viewport to device-width so the overlay renders at
-  // true phone scale; restore PIMS's viewport on close. PIMS reflows beneath
-  // us, which is fine — the mirror re-reads the page on a timer.
-  var savedViewportContent = null;
-  function getViewportMeta() {
-    var m = document.querySelector('meta[name="viewport"]');
-    if (!m) {
-      m = document.createElement('meta');
-      m.name = 'viewport';
-      (document.head || document.documentElement).appendChild(m);
-    }
-    return m;
-  }
-  function scaleToScreen() {
-    var m = getViewportMeta();
-    if (savedViewportContent === null) savedViewportContent = m.getAttribute('content') || '';
-    m.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-    // Large base font; element sizes are in px and already big at phone scale.
-    root.style.fontSize = '20px';
-  }
-  function restoreViewport() {
-    if (savedViewportContent !== null) {
-      var m = getViewportMeta();
-      m.setAttribute('content', savedViewportContent);
-      savedViewportContent = null;
-    }
-  }
+  // NOTE: We previously switched the page viewport to device-width here to make
+  // the overlay bigger, but that reflow broke the wedge capture focus. Reverted
+  // to a no-op so the working scanner is preserved. Larger fixed fonts remain.
+  function scaleToScreen() { /* intentionally no-op (do not touch viewport) */ }
+  function restoreViewport() { /* no-op */ }
 
   function focusCapture() {
     if (root.style.display !== 'block') return;
