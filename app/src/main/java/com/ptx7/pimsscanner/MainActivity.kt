@@ -837,6 +837,45 @@ class MainActivity : ComponentActivity() {
             object : WebViewClient() {
 
 
+                /*
+                 * Midway / Amazon SSO redirects through custom URL schemes
+                 * such as "aea://" and "intent://". A WebView only understands
+                 * http(s) and otherwise fails with ERR_UNKNOWN_URL_SCHEME,
+                 * which blocks the entire PIMS login.
+                 *
+                 * Hand any non-http(s) scheme to the Android system so the
+                 * proper auth app (or Chrome) can complete the handshake, then
+                 * control returns to the WebView for the https callback.
+                 */
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?
+                ): Boolean {
+                    val uri = request?.url ?: return false
+                    val scheme = (uri.scheme ?: "").lowercase()
+                    if (scheme == "http" || scheme == "https") {
+                        return false // let the WebView load it normally
+                    }
+                    return try {
+                        if (scheme == "intent") {
+                            // Resolve intent:// targets to a real Intent.
+                            val intent = Intent.parseUri(
+                                uri.toString(),
+                                Intent.URI_INTENT_SCHEME
+                            )
+                            startActivity(intent)
+                        } else {
+                            startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }
+                        true // we handled it
+                    } catch (e: Exception) {
+                        Log.e(TAG, "No handler for scheme $scheme", e)
+                        statusText.text = "No app available to handle $scheme sign-in"
+                        true
+                    }
+                }
+
+
                 override fun onPageFinished(
 
                     view: WebView?,
