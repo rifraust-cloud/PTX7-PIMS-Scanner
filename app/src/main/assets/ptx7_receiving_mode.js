@@ -40,37 +40,124 @@
     });
   }
 
-  // Expanding set of plausible NDC forms from a raw UPC/GTIN/NDC scan.
-  function ndcCandidates(value) {
-    var d = digitsOnly(value); var set = {};
-    if (!d) return set;
-    set[d] = true;
-    [11, 10].forEach(function (len) {
-      if (d.length >= len) for (var i = 0; i <= d.length - len; i++) set[d.slice(i, i + len)] = true;
-    });
-    if (d.length >= 12) { set[d.slice(1, -1)] = true; set[d.slice(2, -1)] = true; }
-    return set;
+  // ---------------------------------------------------------------------------
+  // NDC resolution (ported from the PTX7 Apps Script Exception tool, which has
+  // field-proven UPC/GS1/GTIN handling). Turns a raw scan into a canonical
+  // 11-digit NDC so Step 1 (NDC capture) and Step 3 (medication match) are
+  // reliable regardless of UPC/GTIN packaging and check digits.
+  // ---------------------------------------------------------------------------
+
+  // UPC-A drug barcode: 3 + 10-digit NDC payload + UPC check digit.
+  // Example 300021495800 -> payload 0002149580 -> NDC-11 00002149580.
+  function deriveNdcFromUpcDrugBarcode(barcode) {
+    var d = digitsOnly(barcode);
+    var ndc10 = '';
+    if (d.length === 12 && d.charAt(0) === '3') ndc10 = d.slice(1, 11);
+    if (!ndc10 && d.length === 13 && d.slice(0, 2) === '03') ndc10 = d.slice(2, 12);
+    if (ndc10.length !== 10) return '';
+    return '0' + ndc10.slice(0, 4) + ndc10.slice(4, 8) + ndc10.slice(8, 10);
   }
 
-  // Returns a 0..100 confidence score comparing a stored NDC to a scan.
-  function ndcMatchScore(stored, scanned) {
-    var a = digitsOnly(stored), b = digitsOnly(scanned);
-    if (!a || !b) return 0;
-    if (a === b) return 100;
-    if (b.indexOf(a) >= 0 || a.indexOf(b) >= 0) return 99;
-    var A = ndcCandidates(a), B = ndcCandidates(b);
-    for (var x in A) for (var y in B) {
-      if (x && y && x === y) return 98;
-      if (x.length >= 9 && y.length >= 9 && (x.indexOf(y) >= 0 || y.indexOf(x) >= 0)) return 96;
+  function deriveNdcFromGtin(gtin) {
+    var d = digitsOnly(gtin);
+    if (d.length !== 14) return '';
+    // Many pharmacy GTIN-14 values are 00 + UPC-A drug barcode.
+    if (d.slice(0, 2) === '00') {
+      var fromUpc = deriveNdcFromUpcDrugBarcode(d.slice(2, 14));
+      if (fromUpc) return fromUpc;
     }
-    // Same stable 10-digit product prefix with package/check-digit variance.
-    var variants = {}; variants[b] = true;
-    if (b.length === 12) variants[b.slice(1)] = true;
-    if (b.length === 13) variants[b.slice(1)] = true;
-    if (b.length === 14) { variants[b.slice(1, -1)] = true; variants[b.slice(2, -1)] = true; }
-    for (var v in variants) {
-      if (v.length === a.length && v.length >= 10 && v.slice(0, -1) === a.slice(0, -1)) return 92;
-      if (a.length === 11 && v.length >= 11 && v.slice(0, 10) === a.slice(0, 10)) return 90;
+    var candidates = [d.slice(2, 13), d.slice(1, 12), d.slice(3, 14), d.slice(0, 11)];
+    for (var i = 0; i < candidates.length; i++) {
+      if (/^\d{11}$/.test(candidates[i])) return candidates[i];
+    }
+    return '';
+  }
+
+  // Resolve any raw NDC/UPC/GTIN form to a canonical 11-digit NDC.
+  function resolveNdc11(raw) {
+    var cleaned = String(raw == null ? '' : raw).trim();
+
+    // Dashed NDC: segment lengths tell us the exact padding.
+    var dash = cleaned.match(/^(\d+)-(\d+)-(\d+)$/);
+    if (dash) {
+      var s1 = dash[1], s2 = dash[2], s3 = dash[3];
+      var total = s1.length + s2.length + s3.length;
+      if (total === 11) return s1 + s2 + s3;
+      if (total === 10) {
+        if (s1.length === 4) return '0' + s1 + s2 + s3;      // 4-4-2
+        if (s2.length === 3) return s1 + '0' + s2 + s3;      // 5-3-2
+        if (s3.length === 1) return s1 + s2 + '0' + s3;      // 5-4-1
+      }
+    }
+
+    var d = digitsOnly(cleaned);
+    if (!d) return '';
+    if (d.length === 11) return d;
+    if (d.length === 9) return '00' + d; // recover zeros stripped elsewhere
+    if (d.length === 10) return '0' + d.slice(0, 4) + d.slice(4, 8) + d.slice(8, 10); // default 4-4-2
+    if (d.length === 12) { var u12 = deriveNdcFromUpcDrugBarcode(d); return u12 || d.slice(1); }
+    if (d.length === 13) { var u13 = deriveNdcFromUpcDrugBarcode(d); return u13 || d.slice(2); }
+    if (d.length === 14) return deriveNdcFromGtin(d);
+    return '';
+  }
+
+  // Compact GS1 (01=GTIN, 21=serial, 17=exp, 10=lot) with no separators.
+  // Returns the embedded NDC-11 if present.
+  function ndcFromCompactGs1(raw) {
+    var s = String(raw == null ? '' : raw).replace(/\s+/g, '').replace(/\|/g, '');
+    var m = s.match(/^01(\d{14})/);
+    if (!m) return '';
+    return deriveNdcFromGtin(m[1]);
+  }
+
+  // All plausible canonical NDC-11 forms for a raw scan (handles the ambiguous
+  // undashed 10-digit case by trying 4-4-2 / 5-3-2 / 5-4-1).
+  function ndc11Variants(raw) {
+    var out = [];
+    var seen = {};
+    function add(v) {
+      v = digitsOnly(v);
+      if (v && v.length === 11 && !seen[v]) { seen[v] = true; out.push(v); }
+    }
+    add(resolveNdc11(raw));
+    add(ndcFromCompactGs1(raw));
+    var d = digitsOnly(raw);
+    if (d.length === 10) {
+      add('0' + d.slice(0, 4) + d.slice(4, 8) + d.slice(8, 10)); // 4-4-2
+      add(d.slice(0, 5) + '0' + d.slice(5, 8) + d.slice(8, 10)); // 5-3-2
+      add(d.slice(0, 5) + d.slice(5, 9) + '0' + d.slice(9, 10)); // 5-4-1
+    }
+    return out;
+  }
+
+  // Primary helper: the single best canonical NDC-11 for a scan (or '').
+  function scanToNdc11(raw) {
+    var v = ndc11Variants(raw);
+    return v.length ? v[0] : '';
+  }
+
+  // Match a scanned barcode against a known/stored NDC using canonical NDC-11
+  // on both sides. Returns a 0..100 confidence score.
+  function ndcMatchScore(stored, scanned) {
+    var storedForms = ndc11Variants(stored);
+    var scanForms = ndc11Variants(scanned);
+    if (!storedForms.length || !scanForms.length) {
+      // Fall back to raw digit equality if neither side resolves to NDC-11.
+      var a = digitsOnly(stored), b = digitsOnly(scanned);
+      if (a && b && a === b) return 100;
+      if (a && b && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return 90;
+      return 0;
+    }
+    for (var i = 0; i < storedForms.length; i++) {
+      for (var j = 0; j < scanForms.length; j++) {
+        if (storedForms[i] === scanForms[j]) return 100;
+      }
+    }
+    // Same 10-digit product prefix, differing package digit.
+    for (var x = 0; x < storedForms.length; x++) {
+      for (var y = 0; y < scanForms.length; y++) {
+        if (storedForms[x].slice(0, 10) === scanForms[y].slice(0, 10)) return 92;
+      }
     }
     return 0;
   }
@@ -379,12 +466,16 @@
   }
 
   function onNdcScan(raw) {
-    var ndc = digitsOnly(raw);
-    if (ndc.length < 9) { tone(false); flashMsg('Not a valid NDC. Scan again.'); return; }
-    state.ndc = currentResultNdc() || ndc;
+    var ndc11 = scanToNdc11(raw);
+    if (!ndc11) { tone(false); flashMsg('Could not read an NDC from that scan. Try again.'); return; }
+    // Canonical NDC-11 is the source of truth. If PIMS already shows a result
+    // NDC, prefer its canonical form so later matching lines up with PIMS.
+    var pimsNdc = currentResultNdc();
+    state.ndc = pimsNdc ? (scanToNdc11(pimsNdc) || ndc11) : ndc11;
+    state.rawNdcScan = String(raw || '');
     tone(true);
-    // Drive the PIMS search so the Incoming Purchases table populates, then
-    // advance to PO selection and poll briefly for the async result.
+    // Drive the PIMS search with the RAW scan so PIMS searches exactly what the
+    // scanner read, then advance to PO selection and poll for the async result.
     setPimsSearch(raw);
     state.step = STEP.PO;
     render();
@@ -456,12 +547,19 @@
     if (el) el.textContent = text;
   }
 
+  // Live scanner diagnostics shown in the footer so we can confirm keystrokes
+  // are actually reaching the overlay on-device.
+  function setDebug(text) {
+    foot.textContent = text;
+  }
+
   // ---------------------------------------------------------------------------
   // Wedge scanner capture (only while overlay is open)
   // ---------------------------------------------------------------------------
   function handleScan(scanned) {
     scanned = String(scanned || '').trim();
     if (!scanned) return;
+    setDebug('Last scan: ' + scanned);
     if (state.step === STEP.NDC) onNdcScan(scanned);
     else if (state.step === STEP.MED) onMedScan(scanned);
     else if (state.step === STEP.LOC) onLocScan(scanned);
@@ -485,6 +583,7 @@
       return;
     }
     state.buffer += e.key;
+    setDebug('Scanning: ' + state.buffer);
     clearTimeout(state.timer);
     // Fallback for imagers that do not send Enter: close on a short pause.
     state.timer = setTimeout(function () {
@@ -492,6 +591,9 @@
       if (s) handleScan(s);
     }, 180);
   }
+  // Capture on both document and window (capture phase) so a focused PIMS
+  // input underneath cannot swallow wedge keystrokes before we see them.
+  document.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('keydown', onKeyDown, true);
 
   document.getElementById('ptx7-rx-back').onclick = function () { window.__ptx7Rx.close(); };
@@ -504,7 +606,18 @@
       window.__ptx7RxReopen = false;
       resetToNdc();
       root.style.display = 'block';
+      // Take keyboard focus away from any PIMS field so the wedge scan lands
+      // in our capture handler, not a hidden input underneath the overlay.
+      try {
+        if (document.activeElement && document.activeElement.blur) {
+          document.activeElement.blur();
+        }
+      } catch (e) {}
+      root.setAttribute('tabindex', '-1');
+      try { root.focus(); } catch (e2) {}
+      state.buffer = '';
       window.scrollTo(0, 0);
+      setDebug('Built-in scanner active \u00b7 scan an NDC');
     },
     close: function () {
       root.style.display = 'none';
