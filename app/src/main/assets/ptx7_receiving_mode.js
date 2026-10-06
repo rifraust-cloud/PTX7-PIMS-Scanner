@@ -578,10 +578,20 @@
       };
     });
 
-    if (root.style.display === 'block') {
+    // Tell the native host whether we own the scan right now (NDC) or PIMS does
+    // (PO/RECEIVE), so native key interception matches and PIMS gets the scan.
+    try {
+      if (window.PTX7Host && window.PTX7Host.setScanOwnership) {
+        window.PTX7Host.setScanOwnership(assistantOwnsScan());
+      }
+    } catch (e) {}
+
+    if (root.style.display === 'block' && assistantOwnsScan()) {
       setTimeout(function () {
         try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
       }, 20);
+    } else {
+      releaseFocusToPims();
     }
   }
 
@@ -777,23 +787,12 @@
     if (state.phase === 'NDC') {
       setDebug('NDC scan: ' + scanned.length + 'ch');
       onNdcScan(scanned);
-    } else if (state.phase === 'RECEIVE') {
-      if (state.releaseFocus) {
-        // Diagnostic mode: do not deliver. We are testing whether the raw
-        // hardware scan reached PIMS on its own.
-        lastScanInfo.method = 'not-delivered (releaseFocus)';
-        setDebug('captured ' + scanned.length + 'ch (not delivered)');
-        return;
-      }
-      var method = deliverScanToPims(scanned);
-      lastScanInfo.method = method;
-      setDebug('deliver ' + scanned.length + 'ch via ' + method);
-      setTimeout(render, 350);
-      setTimeout(render, 1000);
-      setTimeout(render, 1800);
     } else {
-      tone(false);
-      setDebug('Tap the correct PO above (or SCAN A DIFFERENT NDC).');
+      // PO/RECEIVE: the assistant does NOT own the scan. PIMS receives it
+      // directly; this branch should not normally fire (capture input is
+      // inert). If it does, do nothing destructive.
+      lastScanInfo.method = 'observed-only (PIMS owns scan)';
+      setDebug('observed ' + scanned.length + 'ch (PIMS owns scan)');
     }
   }
 
@@ -806,16 +805,29 @@
   function scaleToScreen() { /* intentionally no-op (do not touch viewport) */ }
   function restoreViewport() { /* no-op */ }
 
+  // The assistant OWNS the scanner only during NDC lookup (to drive PO lookup).
+  // In PO selection and RECEIVE, PIMS owns the scan: we must not focus our
+  // capture input or consume the event, so the original scanner stream reaches
+  // PIMS exactly as it does for a Zebra. (Mirrors v2.26.1: it only intercepts
+  // during the PO chooser / Put-Away, never during ordinary receiving.)
+  function assistantOwnsScan() {
+    return state.phase === 'NDC' && !state.releaseFocus;
+  }
+  function releaseFocusToPims() {
+    try { if (document.activeElement === capture) capture.blur(); } catch (e) {}
+  }
+
   function focusCapture() {
     if (root.style.display !== 'block') return;
-    if (state.releaseFocus) return; // diagnostic: let the scan reach PIMS
+    if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
     try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
   }
   capture.addEventListener('blur', function () {
-    if (root.style.display === 'block' && !state.releaseFocus) setTimeout(focusCapture, 10);
+    if (root.style.display === 'block' && assistantOwnsScan()) setTimeout(focusCapture, 10);
   });
   root.addEventListener('click', function () { setTimeout(focusCapture, 0); });
   capture.addEventListener('input', function () {
+    if (!assistantOwnsScan()) { capture.value = ''; return; }
     setDebug('Scanning: ' + capture.value);
     clearTimeout(state.captureTimer);
     state.captureTimer = setTimeout(function () {

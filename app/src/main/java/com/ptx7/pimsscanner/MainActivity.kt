@@ -2800,6 +2800,9 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------
 
     @Volatile private var receivingModeOpen = false
+    // True only while the assistant owns the scan (NDC lookup phase). During
+    // PO select / RECEIVE this is false so key events pass through to PIMS.
+    @Volatile private var assistantOwnsScanNative = true
     private val scanBuffer = StringBuilder()
     private var lastScanKeyAt = 0L
     private var receivingBridgeRegistered = false
@@ -2811,8 +2814,15 @@ class MainActivity : ComponentActivity() {
             fun onReceivingClosed() {
                 runOnUiThread {
                     receivingModeOpen = false
+                    assistantOwnsScanNative = true
                     scanBuffer.setLength(0)
                 }
+            }
+            // JS tells us whether it currently owns the scan (NDC phase=true;
+            // PO/RECEIVE=false) so native key interception matches.
+            @android.webkit.JavascriptInterface
+            fun setScanOwnership(owns: Boolean) {
+                runOnUiThread { assistantOwnsScanNative = owns }
             }
         }, "PTX7Host")
         receivingBridgeRegistered = true
@@ -2836,7 +2846,10 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         // Only intercept while Receiving Mode is open; otherwise behave normally.
-        if (!receivingModeOpen) return super.dispatchKeyEvent(event)
+        // Only intercept keys when the assistant owns the scan (NDC lookup
+        // phase). During PO select / RECEIVE, PIMS owns the scan, so let the
+        // key stream pass straight through to the WebView/PIMS.
+        if (!receivingModeOpen || !assistantOwnsScanNative) return super.dispatchKeyEvent(event)
         if (event.action != android.view.KeyEvent.ACTION_DOWN) {
             // Swallow matching UP events for keys we consume on DOWN.
             return super.dispatchKeyEvent(event)
