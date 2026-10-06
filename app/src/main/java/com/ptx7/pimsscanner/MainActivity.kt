@@ -2872,6 +2872,79 @@ class MainActivity : ComponentActivity() {
 
     private val scanFlushRunnable = Runnable { flushScanBuffer() }
 
+    // ------------------------------------------------------------------
+    // PointMobile / OEM scanner Intent broadcast capture
+    //
+    // The PM86's imager is configured to BROADCAST decoded barcodes via an
+    // OEM scanner service rather than inject key events, so dispatchKeyEvent
+    // never sees them. Register a receiver for the common OEM scan actions and
+    // forward the decoded value into the Receiving overlay.
+    // ------------------------------------------------------------------
+
+    private val scanReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent == null) return
+            val data = extractScanData(intent) ?: return
+            if (data.isBlank()) return
+            runOnUiThread {
+                if (receivingModeOpen) {
+                    forwardScanToOverlay(data.trim())
+                }
+            }
+        }
+    }
+
+    private fun extractScanData(intent: Intent): String? {
+        // PointMobile: device.scanner.event.EXTRA_DATA
+        intent.getStringExtra("device.scanner.event.EXTRA_DATA")?.let { return it }
+        // Honeywell: data / barcode_data strings
+        intent.getStringExtra("data")?.let { return it }
+        intent.getStringExtra("barcode_data")?.let { return it }
+        // Zebra DataWedge: com.symbol.datawedge.data_string
+        intent.getStringExtra("com.symbol.datawedge.data_string")?.let { return it }
+        // Honeywell AIDC: com.honeywell.aidc.extra.EXTRA_BARCODE_DATA
+        intent.getStringExtra("com.honeywell.aidc.extra.EXTRA_BARCODE_DATA")?.let { return it }
+        // Generic fallbacks seen on some OEM services
+        intent.getStringExtra("scanResult")?.let { return it }
+        intent.getStringExtra("SCAN_BARCODE1")?.let { return it }
+        return null
+    }
+
+    private fun registerScanReceiver() {
+        val filter = android.content.IntentFilter().apply {
+            addAction("device.scanner.event.ACTION_DATA_SCAN") // PointMobile
+            addAction("com.honeywell.decode.intent.action.EDIT_DATA") // Honeywell (varies)
+            addAction("com.honeywell.aidc.action.ACTION_BARCODE_READ_EVENT")
+            addAction("com.symbol.datawedge.api.RESULT_ACTION") // Zebra DataWedge
+            addAction("scanner.rcv.message")
+            addAction("nlscan.action.SCANNER_RESULT")
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(scanReceiver, filter, android.content.Context.RECEIVER_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(scanReceiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register scan receiver", e)
+        }
+    }
+
+    private fun unregisterScanReceiver() {
+        try { unregisterReceiver(scanReceiver) } catch (e: Exception) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        registerScanReceiver()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        unregisterScanReceiver()
+    }
+
     override fun onDestroy() {
 
         if (
