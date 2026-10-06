@@ -341,6 +341,26 @@
   foot.textContent = 'Built-in scanner active \u00b7 camera off';
   root.appendChild(foot);
 
+  // Hidden-but-focused capture input. The PM86 wedge commits scanned text into
+  // whatever editable field is focused (this is how it filled Notes). The
+  // Receiving screen has no visible input, so we keep this one focused to catch
+  // the scan. Positioned off to a 1px corner and transparent, but NOT
+  // display:none (which would make it unfocusable).
+  var capture = document.createElement('input');
+  capture.id = 'ptx7-rx-capture';
+  capture.type = 'text';
+  capture.setAttribute('autocomplete', 'off');
+  capture.setAttribute('autocorrect', 'off');
+  capture.setAttribute('autocapitalize', 'off');
+  capture.setAttribute('spellcheck', 'false');
+  capture.setAttribute('inputmode', 'none'); // discourage the soft keyboard
+  capture.style.cssText = [
+    'position:absolute', 'left:0', 'top:0', 'width:1px', 'height:1px',
+    'opacity:0.01', 'border:0', 'padding:0', 'margin:0', 'background:transparent',
+    'color:transparent', 'caret-color:transparent', 'z-index:1'
+  ].join(';');
+  root.appendChild(capture);
+
   (document.body || document.documentElement).appendChild(root);
 
   // ---------------------------------------------------------------------------
@@ -430,6 +450,12 @@
     }
     body.innerHTML = h;
     wire();
+    // Return wedge focus to the capture input after rebuilding the step UI.
+    if (root.style.display === 'block') {
+      setTimeout(function () {
+        try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
+      }, 20);
+    }
   }
 
   function wire() {
@@ -596,6 +622,44 @@
   document.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('keydown', onKeyDown, true);
 
+  // --- Focused capture input path (matches how the wedge fills Notes) --------
+  function focusCapture() {
+    if (root.style.display !== 'block') return;
+    try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
+  }
+
+  // Keep the capture input focused while the overlay is open so the wedge has
+  // somewhere to deliver text. Refocus on any tap/blur.
+  capture.addEventListener('blur', function () {
+    if (root.style.display === 'block') setTimeout(focusCapture, 10);
+  });
+  root.addEventListener('click', function (e) {
+    // Let real buttons work, but return focus to the capture input afterward.
+    setTimeout(focusCapture, 0);
+  });
+
+  // The wedge commits the whole barcode (often followed by Enter). Read it from
+  // the input value on 'input' (with a pause) and on Enter keydown.
+  capture.addEventListener('input', function () {
+    var val = capture.value;
+    setDebug('Scanning: ' + val);
+    clearTimeout(state.captureTimer);
+    state.captureTimer = setTimeout(function () {
+      var s = capture.value.trim();
+      capture.value = '';
+      if (s) handleScan(s);
+    }, 160);
+  });
+  capture.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      clearTimeout(state.captureTimer);
+      var s = capture.value.trim();
+      capture.value = '';
+      if (s) handleScan(s);
+    }
+  });
+
   document.getElementById('ptx7-rx-back').onclick = function () { window.__ptx7Rx.close(); };
 
   // ---------------------------------------------------------------------------
@@ -606,17 +670,18 @@
       window.__ptx7RxReopen = false;
       resetToNdc();
       root.style.display = 'block';
-      // Take keyboard focus away from any PIMS field so the wedge scan lands
-      // in our capture handler, not a hidden input underneath the overlay.
+      // Move focus into our capture input so the keyboard-wedge scan lands
+      // there (this is how the imager filled the Notes app).
       try {
         if (document.activeElement && document.activeElement.blur) {
           document.activeElement.blur();
         }
       } catch (e) {}
-      root.setAttribute('tabindex', '-1');
-      try { root.focus(); } catch (e2) {}
       state.buffer = '';
+      capture.value = '';
       window.scrollTo(0, 0);
+      setTimeout(focusCapture, 50);
+      setTimeout(focusCapture, 300);
       setDebug('Built-in scanner active \u00b7 scan an NDC');
     },
     close: function () {
