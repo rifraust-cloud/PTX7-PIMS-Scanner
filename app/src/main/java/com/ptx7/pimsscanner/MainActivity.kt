@@ -2884,30 +2884,57 @@ class MainActivity : ComponentActivity() {
     private val scanReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
-            val data = extractScanData(intent) ?: return
+            val found = extractScanDataDiagnostic(intent) ?: return
+            val action = intent.action ?: "(no action)"
+            val data = found.second.trim()
             if (data.isBlank()) return
             runOnUiThread {
+                // Always surface how the scan arrived so we can confirm/lock the
+                // exact OEM action+extra on-device, then forward to the overlay.
+                val diag = "via $action [${found.first}]"
+                webView.evaluateJavascript(
+                    "if (window.__ptx7Rx && window.__ptx7Rx.onHostScanDiag) " +
+                        "window.__ptx7Rx.onHostScanDiag(${JSONObject.quote(data)}, ${JSONObject.quote(diag)});",
+                    null
+                )
                 if (receivingModeOpen) {
-                    forwardScanToOverlay(data.trim())
+                    forwardScanToOverlay(data)
                 }
             }
         }
     }
 
-    private fun extractScanData(intent: Intent): String? {
-        // PointMobile: device.scanner.event.EXTRA_DATA
-        intent.getStringExtra("device.scanner.event.EXTRA_DATA")?.let { return it }
-        // Honeywell: data / barcode_data strings
-        intent.getStringExtra("data")?.let { return it }
-        intent.getStringExtra("barcode_data")?.let { return it }
-        // Zebra DataWedge: com.symbol.datawedge.data_string
-        intent.getStringExtra("com.symbol.datawedge.data_string")?.let { return it }
-        // Honeywell AIDC: com.honeywell.aidc.extra.EXTRA_BARCODE_DATA
-        intent.getStringExtra("com.honeywell.aidc.extra.EXTRA_BARCODE_DATA")?.let { return it }
-        // Generic fallbacks seen on some OEM services
-        intent.getStringExtra("scanResult")?.let { return it }
-        intent.getStringExtra("SCAN_BARCODE1")?.let { return it }
+    // Returns Pair(extraKeyName, value) for the first barcode-looking string
+    // extra on the intent, so the probe can report the exact source.
+    private fun extractScanDataDiagnostic(intent: Intent): Pair<String, String>? {
+        val knownKeys = listOf(
+            "device.scanner.event.EXTRA_DATA",            // PointMobile
+            "data", "barcode_data", "barcodeData",         // Honeywell variants
+            "com.symbol.datawedge.data_string",            // Zebra DataWedge
+            "com.honeywell.aidc.extra.EXTRA_BARCODE_DATA", // Honeywell AIDC
+            "scanResult", "SCAN_BARCODE1", "barcode",
+            "EXTRA_BARCODE_DECODING_DATA"
+        )
+        for (k in knownKeys) {
+            intent.getStringExtra(k)?.let { if (it.isNotBlank()) return Pair(k, it) }
+        }
+        // Fallback: scan ALL extras for the first non-trivial string / byte[].
+        val extras = intent.extras ?: return null
+        for (key in extras.keySet()) {
+            val v = extras.get(key)
+            when (v) {
+                is String -> if (v.length in 4..200 && v.any { it.isLetterOrDigit() }) return Pair(key, v)
+                is ByteArray -> {
+                    val s = try { String(v) } catch (e: Exception) { "" }
+                    if (s.length in 4..200) return Pair("$key(bytes)", s)
+                }
+            }
+        }
         return null
+    }
+
+    private fun extractScanData(intent: Intent): String? {
+        return extractScanDataDiagnostic(intent)?.second
     }
 
     private fun registerScanReceiver() {

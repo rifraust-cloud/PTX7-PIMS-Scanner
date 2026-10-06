@@ -633,6 +633,12 @@
     onHostScan: function (scanned) {
       if (root.style.display !== 'block') return;
       handleScan(String(scanned || ''));
+    },
+    // Diagnostic: the host reports how a scan arrived (intent action + extra
+    // key) so we can confirm the exact OEM scanner path on-device. Shows in the
+    // footer regardless of step; harmless in production.
+    onHostScanDiag: function (scanned, diag) {
+      setDebug('SCAN ' + String(scanned || '') + '  ' + String(diag || ''));
     }
   };
 
