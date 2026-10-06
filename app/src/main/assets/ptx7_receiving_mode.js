@@ -185,6 +185,45 @@
     return hs[0] || '';
   }
 
+  // ---- PO receiving-page readers -------------------------------------------
+  // These read the live PIMS "Receiving" page so the overlay can mirror it.
+
+  // The PO number heading (e.g. "3XX63W4G") and status line.
+  function currentPo() {
+    var t = pageText();
+    // Status: OPEN RECEIVABLE appears right under the PO heading.
+    var m = t.match(/\b([A-Z0-9]{6,10})\s+Status:\s*(OPEN|CLOSED|NOT STARTED)/i);
+    if (m) return m[1];
+    // Fallback: a short heading near "Status: ... RECEIVABLE".
+    var hs = [].slice.call(document.querySelectorAll('h1,h2,h3'))
+      .filter(function (el) { return !(el.closest && el.closest('#ptx7-rx-root')); })
+      .map(function (el) { return String(el.textContent || '').trim(); })
+      .filter(function (s) { return /^[A-Z0-9]{6,10}$/.test(s); });
+    return hs[0] || '';
+  }
+
+  // "Receiving in progress: 48/110" -> { received, total } if present.
+  function currentProgress() {
+    var m = pageText().match(/Receiving in progress:\s*(\d+)\s*\/\s*(\d+)/i);
+    return m ? { received: m[1], total: m[2] } : null;
+  }
+
+  // When a drug has been scanned on the receiving page, PIMS shows a detail
+  // panel that says "Scan Location to submit receives" with the drug, NDC, and
+  // Suggested Locations. Returns that info, or null when no drug is pending.
+  function currentReceiveDetail() {
+    var t = pageText();
+    if (!/Scan Location to submit receives/i.test(t)) return null;
+    var ndc = (t.match(/NDC:\s*(\d{9,14})/i) || [])[1] || '';
+    var loc = (t.match(/Suggested Locations?:\s*([A-Z0-9\-\/ ]+)/i) || [])[1] || '';
+    loc = loc.trim().split(/\s{2,}/)[0].trim();
+    // Drug heading: the detail panel repeats the drug name near the NDC.
+    var drug = '';
+    var dm = t.match(/([A-Z][A-Za-z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))\s*NDC:/i);
+    if (dm) drug = dm[1].trim();
+    return { ndc: ndc, drug: drug, location: loc };
+  }
+
   // ---- PO reading (condensed from readIncomingPurchaseOrders) ---------------
   function incomingPurchasesRoot() {
     var headings = [].slice.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span'))
@@ -292,17 +331,16 @@
   // ---------------------------------------------------------------------------
   // State machine
   // ---------------------------------------------------------------------------
-  var STEP = { NDC: 1, PO: 2, MED: 3, LOC: 4 };
+  // State for the persistent receive-mirror surface. Receiving itself is done
+  // by PIMS underneath; this overlay forwards scans to PIMS and mirrors PIMS's
+  // state in a big, simple UI. The operator stays here until Return to PIMS.
   var state = {
-    step: STEP.NDC,
-    ndc: '',          // confirmed NDC from step 1
-    drug: '',
-    po: null,         // chosen PO { po, receivable }
-    buffer: '',       // wedge scan buffer
+    buffer: '',
     lastKeyAt: 0,
     timer: null,
-    poPollTimer: null,
-    poPollTries: 0
+    captureTimer: null,
+    mirrorTimer: null,
+    lastSignature: ''
   };
 
   // ---------------------------------------------------------------------------
@@ -421,69 +459,65 @@
     } catch (e) {}
   }
 
-  // ---------------------------------------------------------------------------
-  // Rendering per step
-  // ---------------------------------------------------------------------------
-  function setDots() {
-    [].slice.call(dots.children).forEach(function (el) {
-      var n = Number(el.getAttribute('data-n'));
-      el.classList.toggle('on', n <= state.step);
-    });
-  }
+
+  // Hide the step-dots row; this flow is a continuous scan loop, not 4 steps.
+  dots.style.display = 'none';
+
+  function setDebug(text) { foot.textContent = text; }
 
   function scanBox(label) {
     return '<div class="ptx7-rx-scanbox"><div class="glyph">|||\u2009||\u2009|\u2009|||</div>' +
       '<div class="label">' + esc(label) + '</div></div>';
   }
-  function exitBtn() { return '<button class="ptx7-rx-btn ghost" type="button" id="ptx7-rx-exit">\u2190 EXIT TO PIMS</button>'; }
 
+  // ---------------------------------------------------------------------------
+  // Mirror the live PIMS receiving page in a big, simple UI.
+  //
+  // The operator stays here and just scans. PIMS underneath does the real
+  // receiving; we forward each scan to PIMS and reflect its state:
+  //   - No drug pending  -> big "SCAN MEDICATION"
+  //   - Drug pending     -> big "SCAN LOCATION" + suggested location + drug
+  //   - After submit     -> brief success, then back to "SCAN MEDICATION"
+  // ---------------------------------------------------------------------------
   function render() {
-    setDots();
-    var h = '';
-    if (state.step === STEP.NDC) {
-      foot.textContent = 'Built-in scanner active \u00b7 camera off';
-      h += '<div class="ptx7-rx-step">STEP 1 OF 4</div>';
-      h += '<div class="ptx7-rx-head">Scan the medication NDC</div>';
-      h += scanBox('SCAN NDC');
-      h += '<div class="ptx7-rx-sub">Point the scanner at the NDC barcode and pull the trigger.</div>';
-      h += '<button class="ptx7-rx-btn wait" type="button" disabled>WAITING FOR SCAN\u2026</button>';
-      h += exitBtn();
-    } else if (state.step === STEP.PO) {
-      foot.textContent = 'Tap a PO to continue';
-      h += '<div class="ptx7-rx-step">STEP 2 OF 4</div>';
-      h += '<div class="ptx7-rx-head">NDC ' + esc(state.ndc) + '</div>';
-      h += '<div class="ptx7-rx-sub">Tap the correct purchase order.</div>';
-      var pos = readPurchaseOrders();
-      if (!pos.length) {
-        h += '<div class="ptx7-rx-confirm bad">No receivable POs found for this NDC yet.' +
-          '<span class="meta">Waiting for PIMS\u2026 or scan a different NDC.</span></div>';
-      } else {
-        pos.forEach(function (p, i) {
-          h += '<button class="ptx7-rx-btn ptx7-rx-po" type="button" data-po="' + i + '">' +
-            esc(p.po) + '<span class="meta">Receivable: ' + esc(p.receivable) + '</span></button>';
-        });
-      }
-      state._pos = pos;
-      h += exitBtn();
-    } else if (state.step === STEP.MED) {
-      foot.textContent = 'Mismatch plays an error tone';
-      h += '<div class="ptx7-rx-step">STEP 3 OF 4</div>';
-      h += '<div class="ptx7-rx-head">PO ' + esc(state.po ? state.po.po : '') + '</div>';
-      h += '<div class="ptx7-rx-sub">Scan the medication to confirm.</div>';
-      h += scanBox('SCAN MEDICATION');
-      h += '<div id="ptx7-rx-medmsg"></div>';
-      h += exitBtn();
-    } else if (state.step === STEP.LOC) {
-      foot.textContent = 'Returns to Step 1 automatically';
-      h += '<div class="ptx7-rx-step">STEP 4 OF 4</div>';
-      h += '<div class="ptx7-rx-head">Scan the shelf location</div>';
-      h += scanBox('SCAN LOCATION');
-      h += '<div id="ptx7-rx-locmsg"></div>';
-      h += exitBtn();
+    var po = currentPo();
+    var prog = currentProgress();
+    var detail = currentReceiveDetail();
+
+    var header = '';
+    if (po) {
+      header += '<div class="ptx7-rx-step">PO ' + esc(po) +
+        (prog ? ' \u00b7 ' + esc(prog.received) + '/' + esc(prog.total) : '') + '</div>';
+    } else {
+      header += '<div class="ptx7-rx-step">RECEIVING</div>';
     }
+
+    var h = header;
+    if (detail && detail.location) {
+      // A drug is scanned and PIMS is waiting for the location to submit.
+      h += '<div class="ptx7-rx-head">Scan this location</div>';
+      h += '<div class="ptx7-rx-success"><div class="loc">' + esc(detail.location) + '</div>' +
+        '<div class="drug">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
+      h += scanBox('SCAN LOCATION');
+      h += '<div class="ptx7-rx-sub">Scan the shelf location to submit this receive.</div>';
+    } else if (detail) {
+      // Drug scanned but no suggested location parsed; still prompt for it.
+      h += '<div class="ptx7-rx-head">Scan the location</div>';
+      h += '<div class="ptx7-rx-sub">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div>';
+      h += scanBox('SCAN LOCATION');
+    } else {
+      // Idle: ready for the next medication scan.
+      h += '<div class="ptx7-rx-head">Scan a medication</div>';
+      h += scanBox('SCAN MEDICATION');
+      h += '<div class="ptx7-rx-sub">Scan each item\u2019s barcode. Then scan its location.</div>';
+    }
+    h += '<button class="ptx7-rx-btn ghost" type="button" id="ptx7-rx-exit">\u2190 RETURN TO PIMS</button>';
+
     body.innerHTML = h;
-    wire();
-    // Return wedge focus to the capture input after rebuilding the step UI.
+    var exit = document.getElementById('ptx7-rx-exit');
+    if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
+
+    // Keep wedge focus on the capture input after each rebuild.
     if (root.style.display === 'block') {
       setTimeout(function () {
         try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
@@ -491,198 +525,83 @@
     }
   }
 
-  function wire() {
-    var exit = document.getElementById('ptx7-rx-exit');
-    if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
-    [].slice.call(body.querySelectorAll('[data-po]')).forEach(function (btn) {
-      btn.onclick = function () {
-        var p = (state._pos || [])[Number(btn.getAttribute('data-po'))];
-        if (p) choosePo(p);
-      };
+  // Continuously mirror PIMS so the big UI tracks the live page (drug scanned,
+  // location submitted, PO changed) without the operator leaving Receive Mode.
+  function startMirror() {
+    clearInterval(state.mirrorTimer);
+    state.mirrorTimer = setInterval(function () {
+      if (root.style.display !== 'block') return;
+      var detail = currentReceiveDetail();
+      var sig = currentPo() + '|' + (detail ? (detail.ndc + '|' + detail.location) : 'idle');
+      if (sig !== state.lastSignature) {
+        state.lastSignature = sig;
+        render();
+      }
+    }, 500);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Forward a captured scan into the PIMS page.
+  //
+  // PIMS has its own global scan listener on the receiving page (a Zebra just
+  // scans and PIMS reacts). So we replay the scanned characters as key events
+  // into the document, then Enter, letting PIMS handle the drug/location.
+  // ---------------------------------------------------------------------------
+  function forwardScanToPims(scanned) {
+    var target = document.body || document.documentElement;
+    for (var i = 0; i < scanned.length; i++) {
+      var ch = scanned.charAt(i);
+      var code = scanned.charCodeAt(i);
+      ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+        var ev;
+        try {
+          ev = new KeyboardEvent(type, {
+            key: ch, bubbles: true, cancelable: true,
+            keyCode: code, which: code, charCode: (type === 'keypress' ? code : 0)
+          });
+        } catch (e) { return; }
+        target.dispatchEvent(ev);
+      });
+    }
+    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+      var ev;
+      try {
+        ev = new KeyboardEvent(type, {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+          bubbles: true, cancelable: true
+        });
+      } catch (e) { return; }
+      target.dispatchEvent(ev);
     });
   }
 
-  function showSuccess(location) {
-    foot.textContent = 'Returns to Step 1 automatically';
-    body.innerHTML =
-      '<div class="ptx7-rx-step">COMPLETE</div>' +
-      '<div class="ptx7-rx-success"><div class="big">\u2713 PUT AWAY</div>' +
-      '<div class="loc">' + esc(location) + '</div>' +
-      '<div class="drug">' + esc(state.drug || ('NDC ' + state.ndc)) + '</div></div>' +
-      '<button class="ptx7-rx-btn primary" type="button" id="ptx7-rx-next">RECEIVE NEXT NDC</button>' +
-      exitBtn();
-    document.getElementById('ptx7-rx-next').onclick = resetToNdc;
-    var exit = document.getElementById('ptx7-rx-exit');
-    if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Step transitions
-  // ---------------------------------------------------------------------------
-  function resetToNdc() {
-    state.step = STEP.NDC; state.ndc = ''; state.drug = ''; state.po = null;
-    render();
-  }
-
-  function onNdcScan(raw) {
-    var digits = digitsOnly(raw);
-    if (digits.length < 8) { tone(false); flashMsg('Could not read an NDC from that scan. Try again.'); return; }
-    // Provisional canonical NDC; PIMS's own result NDC becomes the source of
-    // truth once the search returns (handled in pollForPos).
-    state.ndc = scanToNdc11(raw) || digits;
-    state.rawNdcScan = String(raw || '');
-    tone(true);
-    // Search PIMS with the RAW scanned value so PIMS resolves the NDC exactly
-    // as it would from a manual scan (its box accepts the raw package code).
-    setPimsSearch(raw);
-    state.step = STEP.PO;
-    render();
-    pollForPos();
-  }
-
-  function pollForPos() {
-    clearInterval(state.poPollTimer); state.poPollTries = 0;
-    state.poPollTimer = setInterval(function () {
-      state.poPollTries++;
-      if (state.step !== STEP.PO) { clearInterval(state.poPollTimer); return; }
-      var ndcNow = currentResultNdc();
-      if (ndcNow) state.ndc = ndcNow;            // PIMS result NDC is the truth
-      var drugNow = currentResultDrug();
-      if (drugNow) state.drug = drugNow;
-      var pos = readPurchaseOrders();
-      if (pos.length) { clearInterval(state.poPollTimer); render(); }
-      else if (state.poPollTries > 20) { clearInterval(state.poPollTimer); render(); }
-      else if (state.poPollTries % 3 === 0) { render(); } // refresh header NDC/drug
-    }, 400);
-  }
-
-  function choosePo(p) {
-    state.po = p; tone(true);
-    // Navigate PIMS into the PO (prefer a real link; fall back to click).
-    try {
-      var fresh = readPurchaseOrders().find(function (x) { return x.po === p.po; });
-      var target = (fresh && fresh.target) || p.target;
-      var anchor = target && (target.matches && target.matches('a[href]') ? target :
-        (target.querySelector && target.querySelector('a[href]')) || (target.closest && target.closest('a[href]')));
-      if (anchor && anchor.href) { location.assign(anchor.href); }
-      else if (target && target.click) { target.click(); }
-    } catch (e) {}
-    state.step = STEP.MED;
-    render();
-  }
-
-  function onMedScan(raw) {
-    var msg = document.getElementById('ptx7-rx-medmsg');
-    var score = ndcMatchScore(state.ndc, raw);
-    if (ndcComparable(state.ndc, raw)) {
-      tone(true);
-      if (msg) msg.innerHTML = '<div class="ptx7-rx-confirm ok">\u2713 MATCHES PO' +
-        '<span class="meta">' + esc(state.drug || ('NDC ' + state.ndc)) + '</span></div>';
-      state.step = STEP.LOC;
-      setTimeout(render, 650);
-    } else {
-      tone(false);
-      if (msg) msg.innerHTML = '<div class="ptx7-rx-confirm bad">\u2717 WRONG MEDICATION' +
-        '<span class="meta">Scanned does not match NDC ' + esc(state.ndc) + ' (' + score + '%)</span></div>';
-    }
-  }
-
-  function onLocScan(raw) {
-    var loc = String(raw || '').trim().toUpperCase();
-    if (!/^(?:MAN|CLD)/.test(loc)) {
-      tone(false);
-      var m = document.getElementById('ptx7-rx-locmsg');
-      if (m) m.innerHTML = '<div class="ptx7-rx-confirm bad">\u2717 NOT A LOCATION BARCODE' +
-        '<span class="meta">' + esc(loc) + '</span></div>';
-      return;
-    }
-    // Type the location into PIMS and submit, mirroring the raw-page flow.
-    setPimsSearch(raw);
-    tone(true);
-    showSuccess(loc);
-    // Auto-return to step 1 for the next item.
-    setTimeout(function () { if (state.step === STEP.LOC) resetToNdc(); }, 2500);
-  }
-
-  function flashMsg(text) {
-    var el = body.querySelector('.ptx7-rx-sub');
-    if (el) el.textContent = text;
-  }
-
-  // Live scanner diagnostics shown in the footer so we can confirm keystrokes
-  // are actually reaching the overlay on-device.
-  function setDebug(text) {
-    foot.textContent = text;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Wedge scanner capture (only while overlay is open)
-  // ---------------------------------------------------------------------------
   function handleScan(scanned) {
     scanned = String(scanned || '').trim();
     if (!scanned) return;
-    setDebug('Last scan: ' + scanned);
-    if (state.step === STEP.NDC) onNdcScan(scanned);
-    else if (state.step === STEP.MED) onMedScan(scanned);
-    else if (state.step === STEP.LOC) onLocScan(scanned);
-    // Step PO is tap-only; ignore scans there.
+    tone(true);
+    setDebug('Scan: ' + scanned);
+    // Let PIMS do the actual receiving; mirror reflects the result shortly.
+    forwardScanToPims(scanned);
+    setTimeout(render, 300);
+    setTimeout(render, 900);
   }
 
-  function onKeyDown(e) {
-    if (root.style.display !== 'block') return;
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
-    var isChar = e.key && e.key.length === 1;
-    var isTerm = e.key === 'Enter' || e.key === 'Tab';
-    if (!isChar && !isTerm) return;
-    e.preventDefault(); e.stopPropagation();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    var now = (performance && performance.now) ? performance.now() : Date.now();
-    if (now - state.lastKeyAt > 180) state.buffer = '';
-    state.lastKeyAt = now;
-    if (isTerm) {
-      var s = state.buffer; state.buffer = ''; clearTimeout(state.timer);
-      if (s) handleScan(s);
-      return;
-    }
-    state.buffer += e.key;
-    setDebug('Scanning: ' + state.buffer);
-    clearTimeout(state.timer);
-    // Fallback for imagers that do not send Enter: close on a short pause.
-    state.timer = setTimeout(function () {
-      var s = state.buffer; state.buffer = '';
-      if (s) handleScan(s);
-    }, 180);
-  }
-  // Capture on both document and window (capture phase) so a focused PIMS
-  // input underneath cannot swallow wedge keystrokes before we see them.
-  document.addEventListener('keydown', onKeyDown, true);
-  window.addEventListener('keydown', onKeyDown, true);
-
-  // --- Focused capture input path (matches how the wedge fills Notes) --------
+  // ---------------------------------------------------------------------------
+  // Focused capture input (the PM86 wedge commits text into a focused field).
+  // ---------------------------------------------------------------------------
   function focusCapture() {
     if (root.style.display !== 'block') return;
     try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
   }
-
-  // Keep the capture input focused while the overlay is open so the wedge has
-  // somewhere to deliver text. Refocus on any tap/blur.
   capture.addEventListener('blur', function () {
     if (root.style.display === 'block') setTimeout(focusCapture, 10);
   });
-  root.addEventListener('click', function (e) {
-    // Let real buttons work, but return focus to the capture input afterward.
-    setTimeout(focusCapture, 0);
-  });
-
-  // The wedge commits the whole barcode (often followed by Enter). Read it from
-  // the input value on 'input' (with a pause) and on Enter keydown.
+  root.addEventListener('click', function () { setTimeout(focusCapture, 0); });
   capture.addEventListener('input', function () {
-    var val = capture.value;
-    setDebug('Scanning: ' + val);
+    setDebug('Scanning: ' + capture.value);
     clearTimeout(state.captureTimer);
     state.captureTimer = setTimeout(function () {
-      var s = capture.value.trim();
-      capture.value = '';
+      var s = capture.value.trim(); capture.value = '';
       if (s) handleScan(s);
     }, 160);
   });
@@ -690,8 +609,7 @@
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
       clearTimeout(state.captureTimer);
-      var s = capture.value.trim();
-      capture.value = '';
+      var s = capture.value.trim(); capture.value = '';
       if (s) handleScan(s);
     }
   });
@@ -704,40 +622,30 @@
   window.__ptx7Rx = {
     open: function () {
       window.__ptx7RxReopen = false;
-      resetToNdc();
       root.style.display = 'block';
-      // Move focus into our capture input so the keyboard-wedge scan lands
-      // there (this is how the imager filled the Notes app).
-      try {
-        if (document.activeElement && document.activeElement.blur) {
-          document.activeElement.blur();
-        }
-      } catch (e) {}
-      state.buffer = '';
+      state.lastSignature = '';
       capture.value = '';
+      try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
       window.scrollTo(0, 0);
+      render();
+      startMirror();
       setTimeout(focusCapture, 50);
       setTimeout(focusCapture, 300);
-      setDebug('Built-in scanner active \u00b7 scan an NDC');
     },
     close: function () {
       root.style.display = 'none';
-      clearInterval(state.poPollTimer);
+      clearInterval(state.mirrorTimer);
       if (window.PTX7Host && window.PTX7Host.onReceivingClosed) {
         try { window.PTX7Host.onReceivingClosed(); } catch (e) {}
       }
     },
     isOpen: function () { return root.style.display === 'block'; },
-    // Called by the Android host when it has assembled a full hardware-wedge
-    // scan natively (dispatchKeyEvent). This is the reliable path when the
-    // imager's keystrokes never reach the WebView DOM.
+    // Native host path: Android captured a full hardware-wedge scan and hands
+    // it to us. Forward it into PIMS and mirror.
     onHostScan: function (scanned) {
       if (root.style.display !== 'block') return;
       handleScan(String(scanned || ''));
     },
-    // Diagnostic: the host reports how a scan arrived (intent action + extra
-    // key) so we can confirm the exact OEM scanner path on-device. Shows in the
-    // footer regardless of step; harmless in production.
     onHostScanDiag: function (scanned, diag) {
       setDebug('SCAN ' + String(scanned || '') + '  ' + String(diag || ''));
     }
