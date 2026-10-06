@@ -48,6 +48,12 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 1001
         private const val TAG = "PTX7Scanner"
+
+        /*
+         * The integrated camera scanner is tabled in favor of the device's
+         * built-in keyboard-wedge imager. Flip to true to re-enable CameraX.
+         */
+        private const val CAMERA_SCANNER_ENABLED = false
     }
 
     private lateinit var previewView: PreviewView
@@ -164,7 +170,7 @@ class MainActivity : ComponentActivity() {
         scannerCollapseButton.text = "PIMS MOBILE   ▼"
 
         quickScanButton.visibility =
-            View.VISIBLE
+            if (CAMERA_SCANNER_ENABLED) View.VISIBLE else View.GONE
 
 
         scannerCollapseButton.setOnClickListener {
@@ -185,7 +191,7 @@ class MainActivity : ComponentActivity() {
                  * one-shot camera control over PIMS.
                  */
                 quickScanButton.visibility =
-                    View.VISIBLE
+                    if (CAMERA_SCANNER_ENABLED) View.VISIBLE else View.GONE
 
             } else {
 
@@ -250,6 +256,8 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
+
+        findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openReceivingMode() }
 
         scanNowButton.setOnClickListener {
 
@@ -354,13 +362,15 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         ) {
-            startCamera()
+            if (CAMERA_SCANNER_ENABLED) startCamera()
         } else {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.CAMERA),
-                CAMERA_PERMISSION_REQUEST
-            )
+            if (CAMERA_SCANNER_ENABLED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.CAMERA),
+                    CAMERA_PERMISSION_REQUEST
+                )
+            }
         }
     }
 
@@ -881,6 +891,9 @@ class MainActivity : ComponentActivity() {
 
 
                         injectPimsUiEnhancements()
+
+
+                        installReceivingMode()
 
 
                     }, 500)
@@ -2681,6 +2694,58 @@ class MainActivity : ComponentActivity() {
 
 
 
+    // ------------------------------------------------------------------
+    // Receiving Mode
+    //
+    // A simplified, large-button receiving flow driven by the device's
+    // built-in keyboard-wedge scanner. The UI lives in the injected
+    // assets/ptx7_receiving_mode.js overlay; this host code only loads it,
+    // toggles it, and exposes a tiny bridge back to Android.
+    // ------------------------------------------------------------------
+
+    private var receivingModeInstalled = false
+
+    private fun readAsset(name: String): String {
+        return try {
+            assets.open(name).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read asset $name", e)
+            ""
+        }
+    }
+
+    /*
+     * Inject the Receiving Mode overlay script into the current PIMS page.
+     * Safe to call on every page load; the script no-ops if already present.
+     */
+    private fun installReceivingMode() {
+        val js = readAsset("ptx7_receiving_mode.js")
+        if (js.isBlank()) {
+            statusText.text = "Receiving Mode script missing"
+            return
+        }
+        webView.evaluateJavascript(js, null)
+        receivingModeInstalled = true
+    }
+
+    private fun openReceivingMode() {
+        // Ensure the script is present (page may have navigated), then open.
+        val js = readAsset("ptx7_receiving_mode.js")
+        if (js.isBlank()) {
+            toast("Receiving Mode script missing")
+            return
+        }
+        // The script sets this flag path so it opens immediately after install.
+        webView.evaluateJavascript("window.__ptx7RxReopen = true;", null)
+        webView.evaluateJavascript(js) {
+            webView.evaluateJavascript(
+                "if (window.__ptx7Rx) window.__ptx7Rx.open();", null
+            )
+        }
+        receivingModeInstalled = true
+        statusText.text = "Receiving Mode"
+    }
+
     override fun onDestroy() {
 
         if (
@@ -2697,10 +2762,19 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
+        // If Receiving Mode is open, back should close it, not navigate PIMS.
+        webView.evaluateJavascript(
+            "(window.__ptx7Rx && window.__ptx7Rx.isOpen()) ? (window.__ptx7Rx.close(), 'closed') : 'none'"
+        ) { result ->
+            val handled = result != null && result.contains("closed")
+            if (!handled) {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    @Suppress("DEPRECATION")
+                    super.onBackPressed()
+                }
+            }
         }
     }
 }

@@ -632,6 +632,55 @@
 
             android:visibility="visible" />
 
+
+        <!-- ============================================== -->
+        <!-- RECEIVING MODE LAUNCHER                        -->
+        <!--                                                -->
+        <!-- Large, high-contrast entry point for the       -->
+        <!-- simplified scan NDC -> PO -> med -> location   -->
+        <!-- receiving flow. Uses the built-in scanner.     -->
+        <!-- ============================================== -->
+
+        <Button
+
+            android:id="@+id/receiveModeButton"
+
+            android:layout_width="wrap_content"
+
+            android:layout_height="56dp"
+
+            android:layout_gravity="bottom|start"
+
+            android:layout_marginStart="18dp"
+
+            android:layout_marginBottom="20dp"
+
+            android:paddingStart="22dp"
+
+            android:paddingEnd="22dp"
+
+            android:minWidth="0dp"
+
+            android:minHeight="0dp"
+
+            android:backgroundTint="#007A83"
+
+            android:text="RECEIVE"
+
+            android:textColor="#FFFFFF"
+
+            android:textStyle="bold"
+
+            android:textSize="16sp"
+
+            android:elevation="14dp"
+
+            android:clickable="true"
+
+            android:focusable="true"
+
+            android:visibility="visible" />
+
 </FrameLayout>
 
 </LinearLayout>
