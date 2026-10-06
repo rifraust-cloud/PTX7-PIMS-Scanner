@@ -521,19 +521,26 @@
       var po = currentPo();
       var prog = currentProgress();
       var detail = currentReceiveDetail();
-      h += '<div class="ptx7-rx-step">' + (po ? 'PO ' + esc(po) : 'RECEIVING') +
-        (prog ? ' \u00b7 ' + esc(prog.received) + '/' + esc(prog.total) : '') + '</div>';
+      h += '<div class="ptx7-rx-step">' + (po ? 'PO ' + esc(po) : 'RECEIVING') + '</div>';
+
       if (detail) {
-        h += '<div class="ptx7-rx-head">Scan this location</div>';
+        // An item was scanned; PIMS is waiting for the location to submit.
+        h += '<div class="ptx7-rx-head">Scan the location</div>';
         h += '<div class="ptx7-rx-success"><div class="loc">' +
           esc(detail.location || 'SEE PIMS') + '</div>' +
           '<div class="drug">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
         h += scanBox('SCAN LOCATION');
-        h += '<div class="ptx7-rx-sub">Scan the shelf location to submit this receive.</div>';
+        h += '<div class="ptx7-rx-sub">Scan the location to submit this receive.</div>';
       } else {
-        h += '<div class="ptx7-rx-head">Scan a medication</div>';
-        h += scanBox('SCAN MEDICATION');
-        h += '<div class="ptx7-rx-sub">Scan each item, then its location. Stays in this PO.</div>';
+        // Ready for the next item. Show a big "begin / progress" prompt.
+        h += '<div class="ptx7-rx-head">Begin receiving inventory</div>';
+        if (prog) {
+          h += '<div class="ptx7-rx-confirm ok" style="font-size:40px">' +
+            esc(prog.received) + ' / ' + esc(prog.total) +
+            '<span class="meta">items received in this PO</span></div>';
+        }
+        h += scanBox('SCAN ITEM');
+        h += '<div class="ptx7-rx-sub">Scan each item\u2019s 2D barcode, then its location.</div>';
       }
     }
 
@@ -589,17 +596,21 @@
   function choosePo(p) {
     tone(true);
     setDebug('PO: ' + p.po);
+    // Persist intent so that when PIMS navigates to the PO receiving page and
+    // this script re-injects on the fresh document, we auto-resume in RECEIVE.
+    try { sessionStorage.setItem('ptx7_rx_resume', JSON.stringify({ po: p.po, at: Date.now() })); } catch (e) {}
+    state.phase = 'RECEIVE';
+    state.lastSignature = '';
     // Open the PO's receiving page (prefer a real link; fall back to click).
     try {
       var fresh = readPurchaseOrders().find(function (x) { return x.po === p.po; });
       var target = (fresh && fresh.target) || p.target;
       var anchor = target && (target.matches && target.matches('a[href]') ? target :
         (target.querySelector && target.querySelector('a[href]')) || (target.closest && target.closest('a[href]')));
-      if (anchor && anchor.href) { location.assign(anchor.href); }
+      if (anchor && anchor.href) { location.assign(anchor.href); return; }
       else if (target && target.click) { target.click(); }
     } catch (e) {}
-    state.phase = 'RECEIVE';
-    state.lastSignature = '';
+    // SPA click (no reload): render the receive screen now.
     setTimeout(render, 400);
     setTimeout(render, 1200);
   }
@@ -746,8 +757,37 @@
     },
     onHostScanDiag: function (scanned, diag) {
       setDebug('SCAN ' + String(scanned || '') + '  ' + String(diag || ''));
+    },
+    // Reopen directly in the RECEIVE phase (used after navigating into a PO).
+    openInReceive: function () {
+      window.__ptx7RxReopen = false;
+      root.style.display = 'block';
+      state.phase = 'RECEIVE';
+      state.lastSignature = '';
+      capture.value = '';
+      try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+      window.scrollTo(0, 0);
+      render();
+      startMirror();
+      setTimeout(focusCapture, 50);
+      setTimeout(focusCapture, 300);
     }
   };
+
+  // Auto-resume: if we just chose a PO and PIMS navigated to its receiving
+  // page (fresh document), reopen Receive Mode straight into the RECEIVE phase
+  // so the operator never drops back to raw PIMS. The flag expires quickly.
+  try {
+    var resumeRaw = sessionStorage.getItem('ptx7_rx_resume');
+    if (resumeRaw) {
+      var resume = JSON.parse(resumeRaw);
+      sessionStorage.removeItem('ptx7_rx_resume');
+      if (resume && (Date.now() - Number(resume.at || 0) < 30000)) {
+        // Give the PO page a moment to render, then resume.
+        setTimeout(function () { window.__ptx7Rx.openInReceive(); }, 600);
+      }
+    }
+  } catch (e) {}
 
   if (window.__ptx7RxReopen) window.__ptx7Rx.open();
 })();
