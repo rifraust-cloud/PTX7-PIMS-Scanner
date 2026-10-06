@@ -173,6 +173,18 @@
     return m ? m[1] : '';
   }
 
+  // The drug name heading on the PIMS inventory result (e.g.
+  // "Xiromed Progesterone 100 Mg Cap (bottle, 100.0 Capsules)").
+  function currentResultDrug() {
+    var hs = [].slice.call(document.querySelectorAll('h1,h2,h3,h4,[role="heading"]'))
+      .filter(function (el) { return !(el.closest && el.closest('#ptx7-rx-root')); })
+      .map(function (el) { return String(el.textContent || '').replace(/\s+/g, ' ').trim(); })
+      .filter(function (t) {
+        return t && !/^inventory$/i.test(t) && !/incoming purchases|transaction history/i.test(t);
+      });
+    return hs[0] || '';
+  }
+
   // ---- PO reading (condensed from readIncomingPurchaseOrders) ---------------
   function incomingPurchasesRoot() {
     var headings = [].slice.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span'))
@@ -240,13 +252,17 @@
     return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
   }
 
-  // Type a value into the active/first PIMS input and press Enter (used to run
-  // the NDC search exactly like a wedge scan would on the raw page).
+  // Type a value into the PIMS Inventory search box and submit, so the
+  // "Incoming Purchases" PO table populates for the scanned NDC.
   function setPimsSearch(value) {
-    var inputs = [].slice.call(document.querySelectorAll('input,textarea')).filter(isVisible);
+    var inputs = [].slice.call(document.querySelectorAll('input,textarea')).filter(function (el) {
+      // Never target our own overlay's capture/inputs.
+      if (el.closest && el.closest('#ptx7-rx-root')) return false;
+      return isVisible(el);
+    });
     var input = inputs.find(function (el) {
       var p = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
-      return /scan a package|enter an ndc|medication name|search/.test(p);
+      return /scan a package|enter an ndc|dispensable product|medication name|search/.test(p);
     }) || inputs.find(function (el) { return !el.disabled && !el.readOnly; });
     if (!input) return false;
     var proto = input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
@@ -254,9 +270,22 @@
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    ['keydown', 'keyup'].forEach(function (type) {
-      input.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-    });
+
+    // Prefer clicking the real Submit button (Cloudscape forms often ignore a
+    // bare Enter key); fall back to dispatching Enter on the input.
+    var submitBtn = [].slice.call(document.querySelectorAll('button,input[type=submit],[role="button"]'))
+      .filter(function (b) { return !(b.closest && b.closest('#ptx7-rx-root')) && isVisible(b); })
+      .find(function (b) {
+        var t = String(b.innerText || b.value || b.getAttribute('aria-label') || '').trim().toLowerCase();
+        return t === 'submit' || t === 'search';
+      });
+    if (submitBtn) {
+      submitBtn.click();
+    } else {
+      ['keydown', 'keyup'].forEach(function (type) {
+        input.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+      });
+    }
     return true;
   }
 
@@ -290,35 +319,39 @@
   var STYLE = document.createElement('style');
   STYLE.textContent =
     '#ptx7-rx-root *{box-sizing:border-box}' +
-    '#ptx7-rx-bar{display:flex;align-items:center;height:58px;background:#007A83;color:#fff;padding:0 12px}' +
-    '#ptx7-rx-bar .back{background:transparent;border:0;color:#fff;font-size:16px;font-weight:900;padding:8px}' +
-    '#ptx7-rx-bar .title{flex:1;text-align:center;font-size:22px;font-weight:900;letter-spacing:.5px}' +
-    '#ptx7-rx-bar .spacer{width:64px}' +
-    '#ptx7-rx-dots{display:flex;justify-content:center;gap:26px;padding:12px 0 4px}' +
-    '.ptx7-rx-dot{width:20px;height:20px;border-radius:50%;background:#cdd5db;color:#59636b;font:900 13px Arial;display:flex;align-items:center;justify-content:center}' +
+    // Full-screen app shell. min() keeps it readable whether the page is at a
+    // phone viewport or the injected wide desktop viewport.
+    '#ptx7-rx-root{font-size:min(5vw,34px)}' +
+    '#ptx7-rx-bar{display:flex;align-items:center;min-height:12vh;background:#007A83;color:#fff;padding:0 3vw}' +
+    '#ptx7-rx-bar .back{background:rgba(255,255,255,.15);border:0;color:#fff;font-size:.8em;font-weight:900;padding:2.5vh 3vw;border-radius:12px}' +
+    '#ptx7-rx-bar .title{flex:1;text-align:center;font-size:1.2em;font-weight:900;letter-spacing:1px}' +
+    '#ptx7-rx-bar .spacer{width:16vw}' +
+    '#ptx7-rx-dots{display:flex;justify-content:center;gap:5vw;padding:3vh 0 1vh}' +
+    '.ptx7-rx-dot{width:1.6em;height:1.6em;border-radius:50%;background:#cdd5db;color:#59636b;font-weight:900;font-size:.7em;display:flex;align-items:center;justify-content:center}' +
     '.ptx7-rx-dot.on{background:#007A83;color:#fff}' +
-    '#ptx7-rx-body{padding:4px 20px 24px;max-width:560px;margin:0 auto}' +
-    '.ptx7-rx-step{text-align:center;color:#59636b;font-weight:900;font-size:15px;margin:8px 0 2px}' +
-    '.ptx7-rx-head{text-align:center;color:#172b3a;font-weight:900;font-size:20px;margin:2px 0 2px}' +
-    '.ptx7-rx-sub{text-align:center;color:#59636b;font-size:15px;margin:2px 0 10px}' +
-    '.ptx7-rx-scanbox{border:4px solid #007A83;border-radius:18px;padding:22px 10px;text-align:center;margin:12px 0}' +
-    '.ptx7-rx-scanbox .glyph{font-size:40px;letter-spacing:4px}' +
-    '.ptx7-rx-scanbox .label{color:#007A83;font-weight:900;font-size:21px;margin-top:8px}' +
-    '.ptx7-rx-btn{display:block;width:100%;border:0;border-radius:16px;padding:20px;margin:10px 0;font:900 22px Arial;cursor:pointer}' +
-    '.ptx7-rx-btn.primary{background:#007A83;color:#fff}' +
-    '.ptx7-rx-btn.ghost{background:#fff;color:#005A61;border:3px solid #cdd5db}' +
+    '#ptx7-rx-body{padding:1vh 5vw 4vh;max-width:none;margin:0}' +
+    '.ptx7-rx-step{text-align:center;color:#59636b;font-weight:900;font-size:.6em;letter-spacing:1px;margin:1.5vh 0 .5vh}' +
+    '.ptx7-rx-head{text-align:center;color:#172b3a;font-weight:900;font-size:1em;line-height:1.15;margin:.5vh 0}' +
+    '.ptx7-rx-sub{text-align:center;color:#59636b;font-size:.62em;margin:.5vh 0 2vh}' +
+    '.ptx7-rx-scanbox{border:5px solid #007A83;border-radius:22px;padding:5vh 4vw;text-align:center;margin:3vh 0}' +
+    '.ptx7-rx-scanbox .glyph{font-size:2em;letter-spacing:6px}' +
+    '.ptx7-rx-scanbox .label{color:#007A83;font-weight:900;font-size:1em;margin-top:2vh}' +
+    // Giant primary buttons: tall, chunky, easy to hit.
+    '.ptx7-rx-btn{display:block;width:100%;border:0;border-radius:20px;padding:3.4vh 4vw;margin:2.2vh 0;font-weight:900;font-size:1em;cursor:pointer;line-height:1.1}' +
+    '.ptx7-rx-btn.primary{background:#007A83;color:#fff;box-shadow:0 6px 0 #005a61}' +
+    '.ptx7-rx-btn.ghost{background:#fff;color:#005A61;border:4px solid #cdd5db}' +
     '.ptx7-rx-btn.wait{background:#eceff2;color:#59636b}' +
-    '.ptx7-rx-btn .meta{display:block;font-size:14px;font-weight:700;margin-top:4px}' +
-    '.ptx7-rx-po{background:#fff;color:#007A83;border:3px solid #007A83}' +
-    '.ptx7-rx-confirm{border-radius:14px;padding:14px;margin:12px 0;text-align:center;font-weight:900}' +
-    '.ptx7-rx-confirm.ok{background:#e6f6eb;border:2px solid #087f3f;color:#087f3f}' +
-    '.ptx7-rx-confirm.bad{background:#fff1f0;border:2px solid #b42318;color:#b42318}' +
-    '.ptx7-rx-confirm .meta{display:block;color:#172b3a;font-weight:700;font-size:15px;margin-top:4px}' +
-    '.ptx7-rx-success{background:#087f3f;color:#fff;border-radius:18px;padding:26px 14px;text-align:center;margin:12px 0}' +
-    '.ptx7-rx-success .big{font-size:34px;font-weight:900}' +
-    '.ptx7-rx-success .loc{font-size:26px;font-weight:900;margin-top:8px}' +
-    '.ptx7-rx-success .drug{font-size:16px;margin-top:6px}' +
-    '#ptx7-rx-foot{position:sticky;bottom:0;background:#f6f8f9;text-align:center;color:#59636b;font-size:13px;padding:12px}';
+    '.ptx7-rx-btn .meta{display:block;font-size:.5em;font-weight:800;margin-top:1vh;opacity:.9}' +
+    '.ptx7-rx-po{background:#fff;color:#007A83;border:4px solid #007A83}' +
+    '.ptx7-rx-confirm{border-radius:18px;padding:3vh 4vw;margin:2.5vh 0;text-align:center;font-weight:900;font-size:.9em}' +
+    '.ptx7-rx-confirm.ok{background:#e6f6eb;border:3px solid #087f3f;color:#087f3f}' +
+    '.ptx7-rx-confirm.bad{background:#fff1f0;border:3px solid #b42318;color:#b42318}' +
+    '.ptx7-rx-confirm .meta{display:block;color:#172b3a;font-weight:700;font-size:.55em;margin-top:1vh}' +
+    '.ptx7-rx-success{background:#087f3f;color:#fff;border-radius:22px;padding:6vh 4vw;text-align:center;margin:3vh 0}' +
+    '.ptx7-rx-success .big{font-size:1.5em;font-weight:900}' +
+    '.ptx7-rx-success .loc{font-size:1.2em;font-weight:900;margin-top:2vh;letter-spacing:1px}' +
+    '.ptx7-rx-success .drug{font-size:.6em;margin-top:1.5vh}' +
+    '#ptx7-rx-foot{position:sticky;bottom:0;background:#f6f8f9;text-align:center;color:#59636b;font-size:.45em;padding:1.5vh 3vw}';
   root.appendChild(STYLE);
 
   var bar = document.createElement('div');
@@ -492,16 +525,15 @@
   }
 
   function onNdcScan(raw) {
-    var ndc11 = scanToNdc11(raw);
-    if (!ndc11) { tone(false); flashMsg('Could not read an NDC from that scan. Try again.'); return; }
-    // Canonical NDC-11 is the source of truth. If PIMS already shows a result
-    // NDC, prefer its canonical form so later matching lines up with PIMS.
-    var pimsNdc = currentResultNdc();
-    state.ndc = pimsNdc ? (scanToNdc11(pimsNdc) || ndc11) : ndc11;
+    var digits = digitsOnly(raw);
+    if (digits.length < 8) { tone(false); flashMsg('Could not read an NDC from that scan. Try again.'); return; }
+    // Provisional canonical NDC; PIMS's own result NDC becomes the source of
+    // truth once the search returns (handled in pollForPos).
+    state.ndc = scanToNdc11(raw) || digits;
     state.rawNdcScan = String(raw || '');
     tone(true);
-    // Drive the PIMS search with the RAW scan so PIMS searches exactly what the
-    // scanner read, then advance to PO selection and poll for the async result.
+    // Search PIMS with the RAW scanned value so PIMS resolves the NDC exactly
+    // as it would from a manual scan (its box accepts the raw package code).
     setPimsSearch(raw);
     state.step = STEP.PO;
     render();
@@ -514,9 +546,13 @@
       state.poPollTries++;
       if (state.step !== STEP.PO) { clearInterval(state.poPollTimer); return; }
       var ndcNow = currentResultNdc();
-      if (ndcNow) state.ndc = ndcNow;
+      if (ndcNow) state.ndc = ndcNow;            // PIMS result NDC is the truth
+      var drugNow = currentResultDrug();
+      if (drugNow) state.drug = drugNow;
       var pos = readPurchaseOrders();
-      if (pos.length || state.poPollTries > 20) { clearInterval(state.poPollTimer); render(); }
+      if (pos.length) { clearInterval(state.poPollTimer); render(); }
+      else if (state.poPollTries > 20) { clearInterval(state.poPollTimer); render(); }
+      else if (state.poPollTries % 3 === 0) { render(); } // refresh header NDC/drug
     }, 400);
   }
 
