@@ -350,6 +350,7 @@
     pos: [],            // PO choices for the scanned NDC
     poPollTimer: null,
     poPollTries: 0,
+    releaseFocus: false,   // diagnostic: when true, don't steal focus/deliver
     buffer: '',
     lastKeyAt: 0,
     timer: null,
@@ -542,6 +543,10 @@
         h += scanBox('SCAN ITEM');
         h += '<div class="ptx7-rx-sub">Scan each item\u2019s 2D barcode, then its location.</div>';
         h += '<div class="ptx7-rx-sub" style="font-size:12px;color:#8a93a0">inputs: ' + esc(probePimsInputs()) + '</div>';
+        h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-togglefocus" style="font-size:18px">' +
+          (state.releaseFocus ? 'FOCUS: RELEASED (scan \u2192 PIMS)' : 'FOCUS: CAPTURED (overlay)') + '</button>';
+        h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-diag" style="font-size:18px">SHOW DIAGNOSTIC</button>';
+        h += '<div id="ptx7-rx-diagbox"></div>';
       }
     }
 
@@ -553,6 +558,19 @@
     if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
     var rescan = document.getElementById('ptx7-rx-rescan');
     if (rescan) rescan.onclick = function () { startNdcPhase(); };
+    var tf = document.getElementById('ptx7-rx-togglefocus');
+    if (tf) tf.onclick = function () {
+      state.releaseFocus = !state.releaseFocus;
+      if (state.releaseFocus) { try { capture.blur(); } catch (e) {} }
+      render();
+    };
+    var diag = document.getElementById('ptx7-rx-diag');
+    if (diag) diag.onclick = function () {
+      var box = document.getElementById('ptx7-rx-diagbox');
+      if (!box) return;
+      box.innerHTML = '<textarea readonly style="width:100%;height:260px;font:12px monospace;' +
+        'border:2px solid #cdd5db;border-radius:10px;padding:8px">' + esc(buildDiagnostic()) + '</textarea>';
+    };
     [].slice.call(body.querySelectorAll('[data-po]')).forEach(function (btn) {
       btn.onclick = function () {
         var p = state.pos[Number(btn.getAttribute('data-po'))];
@@ -718,18 +736,58 @@
     }).join(' | ');
   }
 
+  // Last captured scan (for diagnostics only; shows length + control chars, not
+  // routinely logged elsewhere).
+  var lastScanInfo = { len: 0, escaped: '', at: 0, method: '' };
+  function escapeCtl(s) {
+    return String(s || '').replace(/[\u0000-\u001f]/g, function (c) {
+      return '<' + c.charCodeAt(0).toString(16).padStart(2, '0') + '>';
+    });
+  }
+
+  // Build a copyable diagnostic report that identifies the failing layer.
+  function buildDiagnostic() {
+    var ae = document.activeElement;
+    var aeDesc = ae ? ((ae.closest && ae.closest('#ptx7-rx-root')) ? 'overlay:' : 'pims:') +
+      (ae.tagName + (ae.id ? '#' + ae.id : '') +
+        (ae.getAttribute && ae.getAttribute('placeholder') ? '[' + ae.getAttribute('placeholder') + ']' : '')) : 'none';
+    var detail = currentReceiveDetail();
+    var prog = currentProgress();
+    var lines = [
+      'PTX7 Receive diagnostic',
+      'script: v45-diag',
+      'route: ' + location.pathname + location.search,
+      'phase: ' + state.phase,
+      'focusMode: ' + (state.releaseFocus ? 'RELEASED (scan goes to PIMS)' : 'CAPTURED (overlay input)'),
+      'activeElement: ' + aeDesc,
+      'currentPo: ' + (currentPo() || '(none)'),
+      'progress: ' + (prog ? prog.received + '/' + prog.total : '(none)'),
+      'receivePanel: ' + (detail ? ('ndc=' + detail.ndc + ' loc=' + detail.location + ' drug=' + (detail.drug || '')) : '(none)'),
+      'pimsInputs: ' + probePimsInputs(),
+      'lastScan: len=' + lastScanInfo.len + ' method=' + lastScanInfo.method +
+        ' payload=' + lastScanInfo.escaped
+    ];
+    return lines.join('\n');
+  }
+
   function handleScan(scanned) {
     scanned = String(scanned || '').trim();
     if (!scanned) return;
+    lastScanInfo = { len: scanned.length, escaped: escapeCtl(scanned), at: Date.now(), method: '' };
     if (state.phase === 'NDC') {
-      setDebug('NDC scan: ' + scanned);
+      setDebug('NDC scan: ' + scanned.length + 'ch');
       onNdcScan(scanned);
     } else if (state.phase === 'RECEIVE') {
-      // Deliver the FULL barcode payload to PIMS (item or location). Tone only
-      // reflects capture; real success is confirmed by the mirror reading PIMS.
+      if (state.releaseFocus) {
+        // Diagnostic mode: do not deliver. We are testing whether the raw
+        // hardware scan reached PIMS on its own.
+        lastScanInfo.method = 'not-delivered (releaseFocus)';
+        setDebug('captured ' + scanned.length + 'ch (not delivered)');
+        return;
+      }
       var method = deliverScanToPims(scanned);
+      lastScanInfo.method = method;
       setDebug('deliver ' + scanned.length + 'ch via ' + method);
-      // Re-render shortly to reflect PIMS's resulting state.
       setTimeout(render, 350);
       setTimeout(render, 1000);
       setTimeout(render, 1800);
@@ -750,10 +808,11 @@
 
   function focusCapture() {
     if (root.style.display !== 'block') return;
+    if (state.releaseFocus) return; // diagnostic: let the scan reach PIMS
     try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
   }
   capture.addEventListener('blur', function () {
-    if (root.style.display === 'block') setTimeout(focusCapture, 10);
+    if (root.style.display === 'block' && !state.releaseFocus) setTimeout(focusCapture, 10);
   });
   root.addEventListener('click', function () { setTimeout(focusCapture, 0); });
   capture.addEventListener('input', function () {
