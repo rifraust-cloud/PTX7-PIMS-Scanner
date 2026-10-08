@@ -31,6 +31,9 @@
   // Small helpers (ported/condensed from the v2.26.1 Tampermonkey assistant)
   // ---------------------------------------------------------------------------
   var INVENTORY_URL = 'https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7';
+  // Temporary controlled test. Android's visible native EditText is the sole
+  // capture owner; this WebView must not capture or forward scans to PIMS.
+  var NATIVE_CAPTURE_TEST = true;
 
   function digitsOnly(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
@@ -1272,6 +1275,10 @@
   function handleScan(scanned, captureTrace) {
     var original = String(scanned == null ? '' : scanned).replace(/[\r\n]+$/g, '');
     if (!original) return;
+    if (NATIVE_CAPTURE_TEST) {
+      setDebug('CAPTURE TEST ONLY: WebView/PIMS delivery disabled (' + original.length + 'ch)');
+      return;
+    }
     var now = Date.now();
     var trace = captureTrace || {};
     var source = trace.source || 'webview-capture-input';
@@ -1363,6 +1370,14 @@
 
   function focusCapture() {
     if (root.style.display !== 'block') return;
+    if (NATIVE_CAPTURE_TEST) {
+      releaseFocusToPims();
+      try {
+        if (window.PTX7Host && window.PTX7Host.requestScanFocus) window.PTX7Host.requestScanFocus();
+        else setDebug('CAPTURE TEST NOT READY: native bridge unavailable');
+      } catch (error) { setDebug('CAPTURE TEST focus error: ' + (error.message || error)); }
+      return;
+    }
     if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
     try {
       // This asset runs inside the Android app. If the host exposes a native

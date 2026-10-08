@@ -20,6 +20,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ScaleGestureDetector
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
+import android.view.Gravity
+import android.widget.LinearLayout
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -59,6 +63,9 @@ class MainActivity : ComponentActivity() {
          * built-in keyboard-wedge imager. Flip to true to re-enable CameraX.
          */
         private const val CAMERA_SCANNER_ENABLED = false
+        // Temporary controlled test: capture into a visible native field only.
+        // No scan is forwarded to PIMS while this is true.
+        private const val NATIVE_CAPTURE_DIAGNOSTIC = true
     }
 
     private lateinit var previewView: PreviewView
@@ -73,7 +80,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var scannerCollapseButton: Button
     private lateinit var scannerSection: View
     private lateinit var hardwareScanCapture: EditText
+    private lateinit var hardwareCapturePanel: LinearLayout
+    private lateinit var hardwareCaptureStatus: TextView
     private var updatingHardwareScanCapture = false
+    private var diagnosticEventSequence = 0
+    private val diagnosticEvents = ArrayDeque<String>()
     private var hardwareCaptureStartedAt = 0L
     private var hardwareCaptureChangeCount = 0
 
@@ -262,6 +273,11 @@ class MainActivity : ComponentActivity() {
         )
 
         configureWebView()
+        // addJavascriptInterface becomes visible to page JavaScript on the next
+        // document load. Register before loadIntegratedPims/restoreState so the
+        // initial NDC phase can request native scanner focus without falling
+        // back to the WebView capture input.
+        registerReceivingBridge()
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
@@ -2775,16 +2791,73 @@ class MainActivity : ComponentActivity() {
      * hardware KeyEvents and IME commitText; every completed scan then enters
      * the same JS normalization/deduplication/PIMS delivery path.
      */
+    private inner class ScannerDiagnosticEditText(context: Context) : EditText(context) {
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+            val base = super.onCreateInputConnection(outAttrs) ?: return null
+            return object : InputConnectionWrapper(base, false) {
+                override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                    val result = super.commitText(text, newCursorPosition)
+                    recordDiagnosticEvent("InputConnection.commitText text=${escapeForTrace(text?.toString().orEmpty())} result=$result")
+                    return result
+                }
+
+                override fun sendKeyEvent(event: android.view.KeyEvent?): Boolean {
+                    val result = super.sendKeyEvent(event)
+                    recordDiagnosticEvent("InputConnection.sendKeyEvent ${describeKeyEvent(event)} result=$result")
+                    return result
+                }
+            }
+        }
+    }
+
+    private fun escapeForTrace(value: String): String = buildString {
+        value.forEach { character ->
+            if (character.code < 32 || character.code == 127) append("<%02X>".format(character.code))
+            else append(character)
+        }
+    }
+
+    private fun describeKeyEvent(event: android.view.KeyEvent?): String {
+        if (event == null) return "event=null"
+        return "seq=${++diagnosticEventSequence} t=${SystemClock.elapsedRealtime()} " +
+            "action=${event.action} keyCode=${event.keyCode} unicode=${event.unicodeChar} " +
+            "deviceId=${event.deviceId} source=${event.source} repeat=${event.repeatCount} " +
+            "focus=${focusDescription()} owner=$assistantOwnsScanNative"
+    }
+
+    private fun recordDiagnosticEvent(message: String) {
+        runOnUiThread {
+            diagnosticEvents.addLast(message)
+            while (diagnosticEvents.size > 18) diagnosticEvents.removeFirst()
+            refreshCaptureDiagnosticStatus()
+        }
+    }
+
+    private fun refreshCaptureDiagnosticStatus(extra: String = "") {
+        if (!::hardwareCaptureStatus.isInitialized || !::hardwareScanCapture.isInitialized) return
+        val value = hardwareScanCapture.text.toString()
+        val readiness = "READY=${hardwareScanCapture.hasFocus() && hardwareScanCapture.hasWindowFocus()} " +
+            "hasFocus=${hardwareScanCapture.hasFocus()} windowFocus=${hardwareScanCapture.hasWindowFocus()} " +
+            "currentFocus=${focusDescription()} bridge=$receivingBridgeRegistered owner=$assistantOwnsScanNative"
+        val captured = "CAPTURED length=${value.length} value=${escapeForTrace(value)} " +
+            "codes=${value.map { it.code }.joinToString(",")}"
+        hardwareCaptureStatus.text = listOf(readiness, captured, extra, diagnosticEvents.joinToString("\n"))
+            .filter { it.isNotBlank() }.joinToString("\n")
+    }
+
     private fun setupHardwareScanCapture() {
-        hardwareScanCapture = EditText(this).apply {
-            layoutParams = ViewGroup.LayoutParams(1, 1)
-            alpha = 0.01f
+        hardwareScanCapture = ScannerDiagnosticEditText(this).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            alpha = if (NATIVE_CAPTURE_DIAGNOSTIC) 1f else 0.01f
             isSingleLine = true
             isFocusable = true
             isFocusableInTouchMode = true
             isCursorVisible = false
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            setTextColor(android.graphics.Color.TRANSPARENT)
+            setBackgroundColor(if (NATIVE_CAPTURE_DIAGNOSTIC) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT)
+            setTextColor(if (NATIVE_CAPTURE_DIAGNOSTIC) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT)
+            textSize = if (NATIVE_CAPTURE_DIAGNOSTIC) 24f else textSize
+            hint = if (NATIVE_CAPTURE_DIAGNOSTIC) "Scan 360505083350 here" else ""
+            setPadding(18, 14, 18, 14)
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
                 InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
@@ -2793,13 +2866,56 @@ class MainActivity : ComponentActivity() {
             contentDescription = "Hardware scanner capture"
             visibility = View.GONE
         }
-        addContentView(hardwareScanCapture, ViewGroup.LayoutParams(1, 1))
+        hardwareCaptureStatus = TextView(this).apply {
+            setTextColor(android.graphics.Color.BLACK)
+            setBackgroundColor(android.graphics.Color.rgb(238, 243, 246))
+            textSize = 11f
+            setPadding(12, 10, 12, 10)
+        }
+        val clearButton = Button(this).apply {
+            text = "CLEAR / RE-ARM"
+            setOnClickListener {
+                updatingHardwareScanCapture = true
+                hardwareScanCapture.text.clear()
+                updatingHardwareScanCapture = false
+                diagnosticEvents.clear()
+                updateHardwareScanFocus()
+                refreshCaptureDiagnosticStatus("Cleared; scan once.")
+            }
+        }
+        hardwareCapturePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 12, 16, 12)
+            setBackgroundColor(android.graphics.Color.rgb(225, 245, 246))
+            addView(TextView(this@MainActivity).apply {
+                text = "SCANNER CAPTURE TEST — PIMS DELIVERY DISABLED"
+                textSize = 16f
+                setTextColor(android.graphics.Color.rgb(0, 90, 97))
+            })
+            addView(hardwareScanCapture)
+            addView(clearButton)
+            addView(hardwareCaptureStatus)
+            visibility = View.GONE
+        }
+        val panelParams = android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        )
+        addContentView(hardwareCapturePanel, panelParams)
         hardwareScanCapture.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(value: Editable?) {
                 if (updatingHardwareScanCapture || !receivingModeOpen || !assistantOwnsScanNative) return
-                if (value.isNullOrEmpty()) return
+                if (value.isNullOrEmpty()) {
+                    if (NATIVE_CAPTURE_DIAGNOSTIC) refreshCaptureDiagnosticStatus()
+                    return
+                }
+                if (NATIVE_CAPTURE_DIAGNOSTIC) {
+                    refreshCaptureDiagnosticStatus("TextWatcher observed insertion; no PIMS forwarding.")
+                    return
+                }
                 if (hardwareCaptureStartedAt == 0L) hardwareCaptureStartedAt = SystemClock.elapsedRealtime()
                 hardwareCaptureChangeCount += 1
                 hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
@@ -2812,7 +2928,12 @@ class MainActivity : ComponentActivity() {
                 event?.keyCode == android.view.KeyEvent.KEYCODE_TAB
             if (terminator) {
                 val reason = if (event?.keyCode == android.view.KeyEvent.KEYCODE_TAB) "TAB" else "ENTER_OR_IME_ACTION"
-                flushHardwareCaptureInput(reason)
+                if (NATIVE_CAPTURE_DIAGNOSTIC) {
+                    recordDiagnosticEvent("EditorAction terminator=$reason actionId=$actionId ${describeKeyEvent(event)}")
+                    hardwareScanCapture.requestFocus()
+                } else {
+                    flushHardwareCaptureInput(reason)
+                }
                 true
             } else false
         }
@@ -2822,6 +2943,10 @@ class MainActivity : ComponentActivity() {
 
     private fun flushHardwareCaptureInput(terminator: String = "TIMEOUT_180MS") {
         if (!::hardwareScanCapture.isInitialized) return
+        if (NATIVE_CAPTURE_DIAGNOSTIC) {
+            refreshCaptureDiagnosticStatus("Completion observed: $terminator; PIMS forwarding disabled.")
+            return
+        }
         val scan = hardwareScanCapture.text.toString().trimEnd('\r', '\n')
         if (scan.isEmpty()) return
         val startedAt = if (hardwareCaptureStartedAt > 0L) hardwareCaptureStartedAt else SystemClock.elapsedRealtime()
@@ -2837,7 +2962,10 @@ class MainActivity : ComponentActivity() {
 
     private fun updateHardwareScanFocus() {
         if (!::hardwareScanCapture.isInitialized || !::webView.isInitialized) return
-        if (receivingModeOpen && assistantOwnsScanNative) {
+        val shouldCapture = receivingModeOpen && (NATIVE_CAPTURE_DIAGNOSTIC || assistantOwnsScanNative)
+        if (shouldCapture) {
+            if (::hardwareCapturePanel.isInitialized) hardwareCapturePanel.visibility =
+                if (NATIVE_CAPTURE_DIAGNOSTIC) View.VISIBLE else View.GONE
             hardwareScanCapture.visibility = View.VISIBLE
             hardwareScanCapture.bringToFront()
             hardwareScanCapture.isFocusable = true
@@ -2848,12 +2976,14 @@ class MainActivity : ComponentActivity() {
             val inputMethod = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             inputMethod.hideSoftInputFromWindow(hardwareScanCapture.windowToken, 0)
             hardwareScanCapture.postDelayed({
-                if (receivingModeOpen && assistantOwnsScanNative && !hardwareScanCapture.hasFocus()) {
+                if (receivingModeOpen && (NATIVE_CAPTURE_DIAGNOSTIC || assistantOwnsScanNative) && !hardwareScanCapture.hasFocus()) {
                     hardwareScanCapture.requestFocus()
                     hardwareScanCapture.requestFocusFromTouch()
                 }
             }, 60L)
+            if (NATIVE_CAPTURE_DIAGNOSTIC) refreshCaptureDiagnosticStatus("Scanner ready only when READY=true.")
         } else {
+            if (::hardwareCapturePanel.isInitialized) hardwareCapturePanel.visibility = View.GONE
             hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
             updatingHardwareScanCapture = true
             hardwareScanCapture.text.clear()
@@ -3009,6 +3139,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (NATIVE_CAPTURE_DIAGNOSTIC && receivingModeOpen) {
+            val before = describeKeyEvent(event)
+            val result = super.dispatchKeyEvent(event)
+            recordDiagnosticEvent("dispatchKeyEvent BEFORE $before decision=SUPER result=$result")
+            return result
+        }
         // Only intercept while Receiving Mode is open; otherwise behave normally.
         // Only intercept keys when the assistant owns the scan (NDC lookup
         // phase). During PO select / RECEIVE, PIMS owns the scan, so let the
@@ -3083,8 +3219,12 @@ class MainActivity : ComponentActivity() {
                     null
                 )
                 if (receivingModeOpen) {
-                    val now = SystemClock.elapsedRealtime()
-                    forwardScanToOverlay(data, "oem-broadcast:$action:${found.first}", "BROADCAST_COMPLETE", now, 1)
+                    if (NATIVE_CAPTURE_DIAGNOSTIC) {
+                        recordDiagnosticEvent("OEM broadcast observed action=$action extra=${found.first} length=${data.length}; not forwarded")
+                    } else {
+                        val now = SystemClock.elapsedRealtime()
+                        forwardScanToOverlay(data, "oem-broadcast:$action:${found.first}", "BROADCAST_COMPLETE", now, 1)
+                    }
                 }
             }
         }
