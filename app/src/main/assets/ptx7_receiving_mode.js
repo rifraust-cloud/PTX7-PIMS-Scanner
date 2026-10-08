@@ -33,7 +33,7 @@
   var INVENTORY_URL = 'https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7';
   // Temporary controlled test. Android's visible native EditText is the sole
   // capture owner; this WebView must not capture or forward scans to PIMS.
-  var NATIVE_CAPTURE_TEST = true;
+  var NATIVE_CAPTURE_TEST = false;
 
   function digitsOnly(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
@@ -1362,7 +1362,10 @@
   // selection the assistant does not own the scan (tap-only).
   function assistantOwnsScan() {
     if (state.releaseFocus) return false;        // diagnostic override
-    return state.phase === 'NDC' || state.phase === 'RECEIVE';
+    // Arm capture on HOME before the operator taps Receiving. This prevents the
+    // first Bluetooth HID character from leaking during the HOME -> NDC bridge
+    // transition. PO selection remains tap-only; RECEIVE is scanner-owned.
+    return state.phase !== 'PO';
   }
   function releaseFocusToPims() {
     try { if (document.activeElement === capture) capture.blur(); } catch (e) {}

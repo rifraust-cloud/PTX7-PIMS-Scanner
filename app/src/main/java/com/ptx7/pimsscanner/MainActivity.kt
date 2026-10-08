@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         private const val CAMERA_SCANNER_ENABLED = false
         // Temporary controlled test: capture into a visible native field only.
         // No scan is forwarded to PIMS while this is true.
-        private const val NATIVE_CAPTURE_DIAGNOSTIC = true
+        private const val NATIVE_CAPTURE_DIAGNOSTIC = false
     }
 
     private lateinit var previewView: PreviewView
