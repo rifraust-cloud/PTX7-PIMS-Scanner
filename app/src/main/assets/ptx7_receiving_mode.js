@@ -98,6 +98,9 @@
       }
     }
 
+    var itemized = cleaned.match(/^(\d{14}):[^:]+:[^:]+:[^:]+$/);
+    if (itemized) return deriveNdcFromGtin(itemized[1]);
+
     var d = digitsOnly(cleaned);
     if (!d) return '';
     if (d.length === 11) return d;
@@ -116,6 +119,101 @@
     var m = s.match(/^01(\d{14})/);
     if (!m) return '';
     return deriveNdcFromGtin(m[1]);
+  }
+
+  // Parse the PM86 built-in imager's raw GS1 element string. This parser is
+  // intentionally narrow: it converts only when GTIN (01), serial (21),
+  // expiration (17), and lot (10) are all present and structurally valid.
+  // RS6100 colon-form payloads and location barcodes pass through unchanged.
+  function parseGs1MedicationElements(raw) {
+    var source = String(raw == null ? '' : raw)
+      .replace(/^\]d2/i, '')                 // optional GS1 DataMatrix AIM prefix
+      .replace(/\u241d/g, '\u001d')          // visible group-separator symbol
+      .replace(/[\r\n]+$/g, '');
+    var elements = {};
+
+    // Human-readable form: (01)...(21)...(17)...(10)...
+    if (/\(0?1\)/.test(source)) {
+      var human = source.match(/\(01\)(\d{14}).*?\(21\)([^()\u001d]+).*?\(17\)(\d{6}).*?\(10\)([^()\u001d]+)/);
+      if (human) {
+        elements['01'] = human[1]; elements['21'] = human[2];
+        elements['17'] = human[3]; elements['10'] = human[4];
+      }
+    } else {
+      // Some RS5100 profiles remove the GS separator and emit compact
+      // 01+GTIN+21+serial+17+YYMMDD+10+lot. Enumerate every structurally valid
+      // split and accept only one unique interpretation; never guess.
+      if (source.indexOf('\u001d') < 0 && /^01\d{14}21/.test(source)) {
+        var gtin = source.slice(2, 16);
+        var remainder = source.slice(18); // after 01+GTIN14+21
+        var candidates = [];
+        for (var split = 1; split <= Math.min(20, remainder.length - 10); split++) {
+          if (remainder.slice(split, split + 2) !== '17') continue;
+          var expiration = remainder.slice(split + 2, split + 8);
+          if (!/^\d{6}$/.test(expiration) || remainder.slice(split + 8, split + 10) !== '10') continue;
+          var month = Number(expiration.slice(2, 4));
+          var day = Number(expiration.slice(4, 6));
+          if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+          var serial = remainder.slice(0, split);
+          var lot = remainder.slice(split + 10);
+          if (!serial || !lot || serial.length > 20 || lot.length > 20) continue;
+          candidates.push({ gtin: gtin, serial: serial, expiration: expiration, lot: lot });
+        }
+        if (candidates.length !== 1) return null;
+        elements['01'] = candidates[0].gtin;
+        elements['21'] = candidates[0].serial;
+        elements['17'] = candidates[0].expiration;
+        elements['10'] = candidates[0].lot;
+      } else {
+        var segments = source.split('\u001d');
+        for (var si = 0; si < segments.length; si++) {
+        var segment = segments[si];
+        while (segment.length) {
+          var ai = segment.slice(0, 2);
+          if (ai === '01') {
+            if (!/^01\d{14}/.test(segment)) return null;
+            elements['01'] = segment.slice(2, 16); segment = segment.slice(16);
+          } else if (ai === '17') {
+            if (!/^17\d{6}/.test(segment)) return null;
+            elements['17'] = segment.slice(2, 8); segment = segment.slice(8);
+          } else if (ai === '10' || ai === '21') {
+            // GS1 variable-length fields terminate at the group separator or end.
+            var value = segment.slice(2);
+            if (!value) return null;
+            elements[ai] = value; segment = '';
+          } else {
+            return null;
+          }
+        }
+      }
+      }
+    }
+
+    if (!/^\d{14}$/.test(elements['01'] || '') ||
+        !/^\d{6}$/.test(elements['17'] || '') ||
+        !/^[ -~]{1,20}$/.test(elements['10'] || '') ||
+        !/^[ -~]{1,20}$/.test(elements['21'] || '')) return null;
+    return { gtin: elements['01'], lot: elements['10'], expiration: elements['17'], serial: elements['21'] };
+  }
+
+  function normalizeMedicationPayloadForPims(raw) {
+    var original = String(raw == null ? '' : raw).replace(/[\r\n]+$/g, '');
+    if (/^\d{14}:[^:]+:\d{6}:[^:]+$/.test(original)) {
+      return { payload: original, format: 'pims-colon', converted: false };
+    }
+    // Location and ordinary NDC/UPC scans are never transformed.
+    if (/^(?:MAN(?:FW|WS)?|CLD[A-Z]*)\d{3,5}-[A-Z]-\d{1,2}$/i.test(original) || !/^\]?[dD]?2?0?1/.test(original)) {
+      return { payload: original, format: 'unchanged', converted: false };
+    }
+    var parsed = parseGs1MedicationElements(original);
+    if (!parsed) return { payload: original, format: 'unrecognized-gs1-unchanged', converted: false };
+    return {
+      payload: [parsed.gtin, parsed.lot, parsed.expiration, parsed.serial].join(':'),
+      format: original.indexOf('\u001d') >= 0 || original.indexOf('\u241d') >= 0
+        ? 'pm86-gs1-to-pims-colon'
+        : 'rs5100-compact-gs1-to-pims-colon',
+      converted: true
+    };
   }
 
   // All plausible canonical NDC-11 forms for a raw scan (handles the ambiguous
@@ -472,7 +570,13 @@
     timer: null,
     captureTimer: null,
     mirrorTimer: null,
-    lastSignature: ''
+    lastSignature: '',
+    lastPhysicalScan: '',
+    lastPhysicalScanAt: 0,
+    lastPhysicalScanSource: '',
+    forwardSequence: 0,
+    captureStartedAt: 0,
+    captureEventCount: 0
   };
 
   // ---------------------------------------------------------------------------
@@ -939,6 +1043,13 @@
     setTimeout(render, 1200);
   }
 
+  function receiveTraceSignature(detail) {
+    if (!detail) return '(none)';
+    return [detail.ndc, (detail.locations || []).join(','),
+      detail.scanned ? detail.scanned.pkgs + '/' + detail.scanned.units : '',
+      detail.received ? detail.received.pkgs + '/' + detail.received.units : ''].join('|');
+  }
+
   // Continuously mirror PIMS. A page-driven watchdog keeps the phase correct:
   // once PIMS is on a PO receiving page, we must be in RECEIVE (so item scans
   // are released to PIMS, not treated as a new NDC lookup). This handles both
@@ -961,6 +1072,16 @@
       if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
       var prog = currentProgress();
+      if (lastScanInfo.forwardedAt && lastScanInfo.pimsResult === 'awaiting-pims') {
+        var responseChanged = detail && (!lastScanInfo.preForwardHadDetail ||
+          receiveTraceSignature(detail) !== lastScanInfo.preForwardDetailSignature);
+        var dialogClosed = !detail && lastScanInfo.preForwardHadDetail;
+        if (responseChanged || dialogClosed) {
+          lastScanInfo.pimsResult = dialogClosed ? 'receive-dialog-closed-or-updated' : 'receive-dialog-opened-or-updated';
+          lastScanInfo.pimsResponseMs = Date.now() - lastScanInfo.forwardedAt;
+          lastScanInfo.pimsDetailSignature = detail ? receiveTraceSignature(detail) : '(none)';
+        }
+      }
       // Remember the current medication so the progress card can show it as
       // "Last received" after submission (labeled, never as current).
       if (detail && detail.drug) state.lastMed = detail;
@@ -1051,6 +1172,8 @@
     } catch (e) {}
 
     var target = document; // PIMS listens at the document level
+    var dispatchStarted = performance.now();
+    var dispatchedEvents = 0;
 
     function fireKeypress(ch) {
       var code = ch.charCodeAt(0);
@@ -1072,6 +1195,7 @@
         Object.defineProperty(ev, 'charCode', { get: function () { return code; } });
       } catch (e2) {}
       target.dispatchEvent(ev);
+      dispatchedEvents += 1;
     }
 
     // Fast synchronous burst = tiny elapsed time (passes len*30ms rule).
@@ -1079,7 +1203,11 @@
     // Terminator: Enter (which=13).
     fireKeypress(String.fromCharCode(13));
 
-    return 'doc-keypress x' + payload.length;
+    return {
+      method: 'doc-keypress', eventTarget: 'document', payloadCharacters: payload.length,
+      dispatchedEvents: dispatchedEvents, terminatorCode: 13,
+      dispatchDurationMs: Math.round((performance.now() - dispatchStarted) * 1000) / 1000
+    };
   }
 
   // Diagnostic probe: list PIMS inputs so we can see what PIMS listens on.
@@ -1096,7 +1224,11 @@
 
   // Last captured scan (for diagnostics only; shows length + control chars, not
   // routinely logged elsewhere).
-  var lastScanInfo = { len: 0, escaped: '', at: 0, method: '' };
+  var lastScanInfo = {
+    len: 0, deliveredLen: 0, escaped: '', deliveredEscaped: '', at: 0,
+    method: '', format: '', captureTrace: null, forwardTrace: null,
+    forwardedAt: 0, pimsResult: 'not-forwarded', pimsResponseMs: null
+  };
   function escapeCtl(s) {
     return String(s || '').replace(/[\u0000-\u001f]/g, function (c) {
       return '<' + c.charCodeAt(0).toString(16).padStart(2, '0') + '>';
@@ -1116,44 +1248,91 @@
       'script: v45-diag',
       'route: ' + location.pathname + location.search,
       'phase: ' + state.phase,
-      'focusMode: ' + (state.releaseFocus ? 'RELEASED (scan goes to PIMS)' : 'CAPTURED (overlay input)'),
+      'focusMode: ' + (state.releaseFocus ? 'RELEASED (scan goes to PIMS)' :
+        ((window.PTX7Host && window.PTX7Host.usesNativeCapture && window.PTX7Host.usesNativeCapture()) ?
+          'CAPTURED (native Android field)' : 'CAPTURED (WebView overlay input)')),
       'activeElement: ' + aeDesc,
       'currentPo: ' + (currentPo() || '(none)'),
       'progress: ' + (prog ? prog.received + '/' + prog.total : '(none)'),
       'receivePanel: ' + (detail ? ('ndc=' + detail.ndc + ' loc=' + detail.location + ' drug=' + (detail.drug || '')) : '(none)'),
       'pimsInputs: ' + probePimsInputs(),
-      'lastScan: len=' + lastScanInfo.len + ' method=' + lastScanInfo.method +
-        ' payload=' + lastScanInfo.escaped
+      'lastScan: originalLen=' + lastScanInfo.len + ' deliveredLen=' + lastScanInfo.deliveredLen +
+        ' format=' + lastScanInfo.format + ' method=' + lastScanInfo.method,
+      'captureTrace: ' + JSON.stringify(lastScanInfo.captureTrace || {}),
+      'normalization: original=' + lastScanInfo.escaped + ' delivered=' + lastScanInfo.deliveredEscaped,
+      'forwardTrace: ' + JSON.stringify(lastScanInfo.forwardTrace || {}),
+      'pimsResponse: result=' + lastScanInfo.pimsResult + ' latencyMs=' +
+        (lastScanInfo.pimsResponseMs == null ? '(none)' : lastScanInfo.pimsResponseMs) +
+        ' detail=' + (lastScanInfo.pimsDetailSignature || '(none)')
     ];
     return lines.join('\n');
   }
 
-  function handleScan(scanned) {
-    scanned = String(scanned || '').trim();
-    if (!scanned) return;
-    lastScanInfo = { len: scanned.length, escaped: escapeCtl(scanned), at: Date.now(), method: '' };
+  function handleScan(scanned, captureTrace) {
+    var original = String(scanned == null ? '' : scanned).replace(/[\r\n]+$/g, '');
+    if (!original) return;
+    var now = Date.now();
+    var trace = captureTrace || {};
+    var source = trace.source || 'webview-capture-input';
+    // Block only a duplicate arriving through another capture path. Intentional
+    // later repeats from the same scanner/source remain valid.
+    if (original === state.lastPhysicalScan && source !== state.lastPhysicalScanSource &&
+        now - state.lastPhysicalScanAt < 750) {
+      lastScanInfo.pimsResult = 'cross-path-duplicate-suppressed';
+      setDebug('duplicate path ignored: ' + source + ' after ' + state.lastPhysicalScanSource);
+      return;
+    }
+    state.lastPhysicalScan = original;
+    state.lastPhysicalScanAt = now;
+    state.lastPhysicalScanSource = source;
+
+    var adapted = normalizeMedicationPayloadForPims(original);
+    var delivered = adapted.payload;
+    lastScanInfo = {
+      len: original.length, deliveredLen: delivered.length,
+      escaped: escapeCtl(original), deliveredEscaped: escapeCtl(delivered),
+      at: now, method: '', format: adapted.format,
+      captureTrace: Object.assign({}, trace, {
+        source: source, observedLength: original.length,
+        observedCharacterCodes: Array.prototype.map.call(original, function(ch){ return ch.charCodeAt(0); }).join(',')
+      }),
+      forwardTrace: null, forwardedAt: 0, pimsResult: 'not-forwarded', pimsResponseMs: null,
+      preForwardHadDetail: false, preForwardDetailSignature: '(none)'
+    };
     if (state.phase === 'NDC') {
-      setDebug('NDC scan: ' + scanned.length + 'ch');
-      onNdcScan(scanned);
+      setDebug('NDC scan: ' + original.length + 'ch ' + adapted.format + ' via ' + source);
+      onNdcScan(delivered);
     } else if (state.phase === 'RECEIVE') {
-      // The PM86 only yields scan data via our focused input, so we capture it;
-      // then replay the FULL payload as document keypress events the way PIMS's
-      // scanner listener accepts (item scan OR location scan — PIMS decides
-      // which based on its own receive state). Do NOT reduce to NDC.
-      var method = deliverScanToPims(scanned);
-      lastScanInfo.method = method;
-      setDebug('deliver ' + scanned.length + 'ch via ' + method);
-      // Show "Reading item…" until PIMS reflects the new item or location.
+      var beforeDetail = currentReceiveDetail();
+      lastScanInfo.preForwardHadDetail = !!beforeDetail;
+      lastScanInfo.preForwardDetailSignature = receiveTraceSignature(beforeDetail);
+      var forward = deliverScanToPims(delivered);
+      state.forwardSequence += 1;
+      forward.sequence = state.forwardSequence;
+      forward.normalizedFormat = adapted.format;
+      forward.normalizedLength = delivered.length;
+      forward.normalizedCharacterCodes = Array.prototype.map.call(delivered, function(ch){ return ch.charCodeAt(0); }).join(',');
+      lastScanInfo.forwardTrace = forward;
+      lastScanInfo.method = forward.method + ' x' + delivered.length;
+      lastScanInfo.forwardedAt = Date.now();
+      lastScanInfo.pimsResult = 'awaiting-pims';
+      setDebug('trace #' + forward.sequence + ': ' + source + ' ' + (trace.terminator || 'UNKNOWN') +
+        ' -> ' + delivered.length + 'ch ' + adapted.format + ' -> ' + forward.method);
       state.resolvingItem = true;
       clearTimeout(state.resolveTimer);
-      state.resolveTimer = setTimeout(function () { state.resolvingItem = false; render(); }, 2500);
-      state.lastSignature = ''; // force the mirror to re-evaluate
-      setTimeout(render, 300);
-      setTimeout(render, 900);
-      setTimeout(render, 1600);
+      state.resolveTimer = setTimeout(function () {
+        state.resolvingItem = false;
+        if (lastScanInfo.pimsResult === 'awaiting-pims') {
+          lastScanInfo.pimsResult = 'no-receive-dialog-change-within-2500ms';
+          lastScanInfo.pimsResponseMs = Date.now() - lastScanInfo.forwardedAt;
+        }
+        render();
+      }, 2500);
+      state.lastSignature = '';
+      setTimeout(render, 300); setTimeout(render, 900); setTimeout(render, 1600);
     } else {
-      // PO selection is tap-only.
       lastScanInfo.method = 'ignored (PO select is tap-only)';
+      lastScanInfo.pimsResult = 'not-forwarded-po-selection';
       setDebug('Tap the correct PO above (or SCAN A DIFFERENT NDC).');
     }
   }
@@ -1184,27 +1363,47 @@
   function focusCapture() {
     if (root.style.display !== 'block') return;
     if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
-    try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
+    try {
+      if (window.PTX7Host && window.PTX7Host.usesNativeCapture && window.PTX7Host.usesNativeCapture()) {
+        releaseFocusToPims();
+        if (window.PTX7Host.requestScanFocus) window.PTX7Host.requestScanFocus();
+        return;
+      }
+    } catch (e) {}
+    try { capture.focus({ preventScroll: true }); } catch (e1) { try { capture.focus(); } catch (e2) {} }
   }
   capture.addEventListener('blur', function () {
     if (root.style.display === 'block' && assistantOwnsScan()) setTimeout(focusCapture, 10);
   });
   root.addEventListener('click', function () { setTimeout(focusCapture, 0); });
+  function webviewCaptureTrace(value, terminator) {
+    var started = state.captureStartedAt || Date.now();
+    var trace = {
+      source:'webview-capture-input', focusedView:'INPUT#ptx7-rx-capture',
+      capturedLength:value.length, terminator:terminator, eventCount:state.captureEventCount,
+      captureDurationMs:Date.now()-started,
+      characterCodes:Array.prototype.map.call(value,function(ch){return ch.charCodeAt(0);}).join(',')
+    };
+    state.captureStartedAt = 0; state.captureEventCount = 0;
+    return trace;
+  }
   capture.addEventListener('input', function () {
     if (!assistantOwnsScan()) { capture.value = ''; return; }
-    setDebug('Scanning: ' + capture.value);
+    if (!state.captureStartedAt) state.captureStartedAt = Date.now();
+    state.captureEventCount += 1;
+    setDebug('Scanning: ' + capture.value.length + 'ch via WebView input');
     clearTimeout(state.captureTimer);
     state.captureTimer = setTimeout(function () {
-      var s = capture.value.trim(); capture.value = '';
-      if (s) handleScan(s);
+      var value = capture.value.replace(/[\r\n]+$/g, ''); capture.value = '';
+      if (value) handleScan(value, webviewCaptureTrace(value, 'TIMEOUT_160MS'));
     }, 160);
   });
   capture.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
       clearTimeout(state.captureTimer);
-      var s = capture.value.trim(); capture.value = '';
-      if (s) handleScan(s);
+      var value = capture.value.replace(/[\r\n]+$/g, ''); capture.value = '';
+      if (value) handleScan(value, webviewCaptureTrace(value, e.key.toUpperCase()));
     }
   });
 
@@ -1295,7 +1494,14 @@
     // it to us. Forward it into PIMS and mirror.
     onHostScan: function (scanned) {
       if (root.style.display !== 'block') return;
-      handleScan(String(scanned || ''));
+      handleScan(String(scanned || ''), {source:'legacy-native-bridge',terminator:'UNKNOWN'});
+    },
+    onHostScanTrace: function (scanned, traceJson) {
+      if (root.style.display !== 'block') return;
+      var trace = {};
+      try { trace = JSON.parse(String(traceJson || '{}')); }
+      catch (e) { trace = {source:'native-trace-parse-error',terminator:'UNKNOWN'}; }
+      handleScan(String(scanned || ''), trace);
     },
     onHostScanDiag: function (scanned, diag) {
       setDebug('SCAN ' + String(scanned || '') + '  ' + String(diag || ''));

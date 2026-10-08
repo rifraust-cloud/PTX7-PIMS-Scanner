@@ -17,7 +17,12 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.ScaleGestureDetector
+import android.view.inputmethod.EditorInfo
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -67,6 +72,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var scanNowButton: Button
     private lateinit var scannerCollapseButton: Button
     private lateinit var scannerSection: View
+    private lateinit var hardwareScanCapture: EditText
+    private var updatingHardwareScanCapture = false
+    private var hardwareCaptureStartedAt = 0L
+    private var hardwareCaptureChangeCount = 0
 
     /*
      * Small floating one-shot scanner control.
@@ -213,6 +222,7 @@ class MainActivity : ComponentActivity() {
 
         previewView = findViewById(R.id.previewView)
         webView = findViewById(R.id.webView)
+        setupHardwareScanCapture()
         lastScanText = findViewById(R.id.lastScan)
         debugText = findViewById(R.id.debugText)
         statusText = findViewById(R.id.statusText)
@@ -2757,6 +2767,91 @@ class MainActivity : ComponentActivity() {
      * Inject the Receiving Mode overlay script into the current PIMS page.
      * Safe to call on every page load; the script no-ops if already present.
      */
+    /**
+     * One native editable target for every keyboard-wedge scanner.
+     *
+     * PM86, RS6100, and RS5100 can use different Android input paths even when
+     * Notes displays identical text. A focused native EditText accepts both
+     * hardware KeyEvents and IME commitText; every completed scan then enters
+     * the same JS normalization/deduplication/PIMS delivery path.
+     */
+    private fun setupHardwareScanCapture() {
+        hardwareScanCapture = EditText(this).apply {
+            layoutParams = ViewGroup.LayoutParams(1, 1)
+            alpha = 0.01f
+            isSingleLine = true
+            cursorVisible = false
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setTextColor(android.graphics.Color.TRANSPARENT)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            showSoftInputOnFocus = false
+            contentDescription = "Hardware scanner capture"
+            visibility = View.GONE
+        }
+        addContentView(hardwareScanCapture, ViewGroup.LayoutParams(1, 1))
+        hardwareScanCapture.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(value: Editable?) {
+                if (updatingHardwareScanCapture || !receivingModeOpen || !assistantOwnsScanNative) return
+                if (value.isNullOrEmpty()) return
+                if (hardwareCaptureStartedAt == 0L) hardwareCaptureStartedAt = SystemClock.elapsedRealtime()
+                hardwareCaptureChangeCount += 1
+                hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
+                hardwareScanCapture.postDelayed(hardwareCaptureFlushRunnable, 180L)
+            }
+        })
+        hardwareScanCapture.setOnEditorActionListener { _, actionId, event ->
+            val terminator = actionId == EditorInfo.IME_ACTION_DONE ||
+                event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+                event?.keyCode == android.view.KeyEvent.KEYCODE_TAB
+            if (terminator) {
+                val reason = if (event?.keyCode == android.view.KeyEvent.KEYCODE_TAB) "TAB" else "ENTER_OR_IME_ACTION"
+                flushHardwareCaptureInput(reason)
+                true
+            } else false
+        }
+    }
+
+    private val hardwareCaptureFlushRunnable = Runnable { flushHardwareCaptureInput("TIMEOUT_180MS") }
+
+    private fun flushHardwareCaptureInput(terminator: String = "TIMEOUT_180MS") {
+        if (!::hardwareScanCapture.isInitialized) return
+        val scan = hardwareScanCapture.text.toString().trimEnd('\r', '\n')
+        if (scan.isEmpty()) return
+        val startedAt = if (hardwareCaptureStartedAt > 0L) hardwareCaptureStartedAt else SystemClock.elapsedRealtime()
+        val eventCount = hardwareCaptureChangeCount
+        updatingHardwareScanCapture = true
+        hardwareScanCapture.text.clear()
+        updatingHardwareScanCapture = false
+        hardwareCaptureStartedAt = 0L
+        hardwareCaptureChangeCount = 0
+        forwardScanToOverlay(scan, "native-edittext", terminator, startedAt, eventCount)
+        hardwareScanCapture.postDelayed({ updateHardwareScanFocus() }, 30L)
+    }
+
+    private fun updateHardwareScanFocus() {
+        if (!::hardwareScanCapture.isInitialized || !::webView.isInitialized) return
+        if (receivingModeOpen && assistantOwnsScanNative) {
+            hardwareScanCapture.visibility = View.VISIBLE
+            hardwareScanCapture.requestFocus()
+            hardwareScanCapture.setSelection(hardwareScanCapture.text.length)
+        } else {
+            hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
+            updatingHardwareScanCapture = true
+            hardwareScanCapture.text.clear()
+            updatingHardwareScanCapture = false
+            hardwareCaptureStartedAt = 0L
+            hardwareCaptureChangeCount = 0
+            hardwareScanCapture.clearFocus()
+            hardwareScanCapture.visibility = View.GONE
+            webView.requestFocus()
+        }
+    }
+
     private fun installReceivingMode() {
         val js = readAsset("ptx7_receiving_mode.js")
         if (js.isBlank()) {
@@ -2787,6 +2882,7 @@ class MainActivity : ComponentActivity() {
         receivingModeInstalled = true
         receivingModeOpen = true
         scanBuffer.setLength(0)
+        updateHardwareScanFocus()
         statusText.text = "Receiving Mode"
     }
 
@@ -2804,6 +2900,8 @@ class MainActivity : ComponentActivity() {
     // PO select / RECEIVE this is false so key events pass through to PIMS.
     @Volatile private var assistantOwnsScanNative = true
     private val scanBuffer = StringBuilder()
+    private var scanBufferStartedAt = 0L
+    private var scanBufferEventCount = 0
     private var lastScanKeyAt = 0L
     private var receivingBridgeRegistered = false
 
@@ -2816,32 +2914,83 @@ class MainActivity : ComponentActivity() {
                     receivingModeOpen = false
                     assistantOwnsScanNative = true
                     scanBuffer.setLength(0)
+                    updateHardwareScanFocus()
                 }
             }
             // JS tells us whether it currently owns the scan (NDC phase=true;
             // PO/RECEIVE=false) so native key interception matches.
             @android.webkit.JavascriptInterface
             fun setScanOwnership(owns: Boolean) {
-                runOnUiThread { assistantOwnsScanNative = owns }
+                runOnUiThread {
+                    assistantOwnsScanNative = owns
+                    updateHardwareScanFocus()
+                }
+            }
+            @android.webkit.JavascriptInterface
+            fun usesNativeCapture(): Boolean = true
+            @android.webkit.JavascriptInterface
+            fun requestScanFocus() {
+                runOnUiThread { updateHardwareScanFocus() }
             }
         }, "PTX7Host")
         receivingBridgeRegistered = true
     }
 
-    private fun forwardScanToOverlay(scan: String) {
+    private fun focusDescription(): String {
+        val view = currentFocus ?: return "none"
+        val idName = if (view.id != View.NO_ID) {
+            try { resources.getResourceEntryName(view.id) } catch (_: Exception) { view.id.toString() }
+        } else "no-id"
+        return "${view.javaClass.simpleName}#$idName:${view.contentDescription ?: ""}"
+    }
+
+    private fun escapedPayload(value: String): String = buildString {
+        value.forEach { character ->
+            if (character.code < 32 || character.code == 127) append("<%02X>".format(character.code))
+            else append(character)
+        }
+    }
+
+    private fun forwardScanToOverlay(
+        scan: String,
+        source: String,
+        terminator: String,
+        startedAt: Long,
+        eventCount: Int
+    ) {
         if (scan.isEmpty()) return
-        val quoted = JSONObject.quote(scan)
+        val completedAt = SystemClock.elapsedRealtime()
+        val trace = JSONObject().apply {
+            put("source", source)
+            put("focusedView", focusDescription())
+            put("capturedLength", scan.length)
+            put("escapedPayload", escapedPayload(scan))
+            put("characterCodes", scan.map { it.code }.joinToString(","))
+            put("terminator", terminator)
+            put("eventCount", eventCount)
+            put("captureDurationMs", (completedAt - startedAt).coerceAtLeast(0L))
+            put("capturedAtElapsedMs", completedAt)
+        }
+        val quotedScan = JSONObject.quote(scan)
+        val quotedTrace = JSONObject.quote(trace.toString())
         webView.evaluateJavascript(
-            "if (window.__ptx7Rx && window.__ptx7Rx.onHostScan) window.__ptx7Rx.onHostScan($quoted);",
+            "if (window.__ptx7Rx) {" +
+                "if (window.__ptx7Rx.onHostScanTrace) window.__ptx7Rx.onHostScanTrace($quotedScan,$quotedTrace);" +
+                "else if (window.__ptx7Rx.onHostScan) window.__ptx7Rx.onHostScan($quotedScan);" +
+            "}",
             null
         )
     }
 
-    private fun flushScanBuffer() {
+    private fun flushScanBuffer(terminator: String = "TIMEOUT_180MS") {
         if (scanBuffer.isEmpty()) return
         val scan = scanBuffer.toString()
+        val startedAt = if (scanBufferStartedAt > 0L) scanBufferStartedAt else SystemClock.elapsedRealtime()
+        val eventCount = scanBufferEventCount
         scanBuffer.setLength(0)
-        forwardScanToOverlay(scan)
+        scanBufferStartedAt = 0L
+        scanBufferEventCount = 0
+        forwardScanToOverlay(scan, "activity-keyevent", terminator, startedAt, eventCount)
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
@@ -2861,7 +3010,9 @@ class MainActivity : ComponentActivity() {
             keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER ||
             keyCode == android.view.KeyEvent.KEYCODE_TAB
         ) {
-            flushScanBuffer()
+            val terminator = if (keyCode == android.view.KeyEvent.KEYCODE_TAB) "TAB" else "ENTER"
+            flushScanBuffer(terminator)
+            flushHardwareCaptureInput(terminator)
             return true
         }
 
@@ -2870,8 +3021,14 @@ class MainActivity : ComponentActivity() {
         if (ch != 0) {
             val now = SystemClock.elapsedRealtime()
             // A long pause means a new scan; reset the buffer.
-            if (now - lastScanKeyAt > 300L) scanBuffer.setLength(0)
+            if (now - lastScanKeyAt > 300L) {
+                scanBuffer.setLength(0)
+                scanBufferStartedAt = now
+                scanBufferEventCount = 0
+            }
+            if (scanBuffer.isEmpty()) scanBufferStartedAt = now
             lastScanKeyAt = now
+            scanBufferEventCount += 1
             scanBuffer.append(ch.toChar())
             // Fallback flush for imagers that do not send Enter: a short pause
             // after the last character closes the scan.
@@ -2883,7 +3040,7 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private val scanFlushRunnable = Runnable { flushScanBuffer() }
+    private val scanFlushRunnable = Runnable { flushScanBuffer("TIMEOUT_180MS") }
 
     // ------------------------------------------------------------------
     // PointMobile / OEM scanner Intent broadcast capture
@@ -2899,7 +3056,7 @@ class MainActivity : ComponentActivity() {
             if (intent == null) return
             val found = extractScanDataDiagnostic(intent) ?: return
             val action = intent.action ?: "(no action)"
-            val data = found.second.trim()
+            val data = found.second.trimEnd('\r', '\n')
             if (data.isBlank()) return
             runOnUiThread {
                 // Always surface how the scan arrived so we can confirm/lock the
@@ -2911,7 +3068,8 @@ class MainActivity : ComponentActivity() {
                     null
                 )
                 if (receivingModeOpen) {
-                    forwardScanToOverlay(data)
+                    val now = SystemClock.elapsedRealtime()
+                    forwardScanToOverlay(data, "oem-broadcast:$action:${found.first}", "BROADCAST_COMPLETE", now, 1)
                 }
             }
         }
@@ -2978,6 +3136,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         registerScanReceiver()
+        if (receivingModeOpen) updateHardwareScanFocus()
     }
 
     override fun onPause() {
