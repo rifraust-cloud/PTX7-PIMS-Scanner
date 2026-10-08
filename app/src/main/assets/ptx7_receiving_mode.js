@@ -229,23 +229,16 @@
     return m ? { received: m[1], total: m[2] } : null;
   }
 
-  // Find the active receiving dialog/panel element (scoped), excluding our
-  // overlay. This is the authoritative source for the pending item.
+  // Find the active receiving dialog (role="dialog" with the confirmed marker),
+  // excluding our overlay.
   function activeReceivePanel() {
-    var marker = /Scan Location to submit receives|Complete receive before proceeding to next NDC/i;
-    // Prefer a role=dialog/alertdialog that contains the marker text.
+    var marker = /Complete receive before proceeding to next NDC|Scan Location to submit receives/i;
     var dialogs = [].slice.call(document.querySelectorAll('[role="dialog"],[role="alertdialog"]'))
       .filter(function (d) { return !(d.closest && d.closest('#ptx7-rx-root')); });
     for (var i = 0; i < dialogs.length; i++) {
       if (marker.test(dialogs[i].textContent || '')) return dialogs[i];
     }
-    // Fallback: the smallest element whose own text contains the marker.
-    var all = [].slice.call(document.querySelectorAll('section,aside,div'))
-      .filter(function (el) {
-        return !(el.closest && el.closest('#ptx7-rx-root')) && marker.test(el.textContent || '');
-      })
-      .sort(function (a, b) { return (a.textContent || '').length - (b.textContent || '').length; });
-    return all[0] || null;
+    return null;
   }
 
   function allLocationsIn(text) {
@@ -255,58 +248,104 @@
     return Object.keys(set);
   }
 
-  // Read the active receiving panel and bind ONE pending item together.
-  // Returns null when no pending item is resolvable (caller shows "Reading…").
-  function currentReceiveDetail() {
-    var panel = activeReceivePanel();
-    if (!panel) return null;
-    var t = (panel.innerText || panel.textContent || '').replace(/\u00a0/g, ' ');
+  function parsePair(s) {
+    var m = String(s || '').match(/(\d+)\s*\((\d+)\)/);
+    return m ? { pkgs: Number(m[1]), units: Number(m[2]) } : null;
+  }
 
-    // Product id / NDC from the scoped panel only.
-    var ndc = (t.match(/NDC:?\s*-?\s*(\d{9,14})/i) || [])[1] ||
-              (t.match(/\b(\d{11})\b/) || [])[1] || '';
-
-    // Drug name: a line containing a package descriptor, within the panel.
-    var drug = '';
-    var dm = t.match(/([A-Z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))/i);
-    if (dm) drug = dm[1].replace(/\s+/g, ' ').trim();
-
-    // ALL suggested locations present in the panel (not just the first).
-    var locations = allLocationsIn(t);
-
-    function pairAfter(label) {
-      var re = new RegExp(label + '\\s*:?\\s*(\\d+)\\s*\\((\\d+)\\)', 'i');
-      var m = t.match(re);
-      return m ? { pkgs: Number(m[1]), units: Number(m[2]) } : null;
-    }
-    var ordered = pairAfter('Quantity Ordered');
-    var received = pairAfter('Quantity Received');
-    var scanned = pairAfter('Currently Scanned');
-    var pkgSize = 0;
-    [received, scanned, ordered].forEach(function (p) {
-      if (!pkgSize && p && p.pkgs > 0) pkgSize = Math.round(p.units / p.pkgs);
+  // Map a table's rows by header text. Returns array of {header:cellText}.
+  function readTableByHeaders(table) {
+    if (!table) return [];
+    var heads = [].slice.call(table.querySelectorAll('thead th'));
+    if (!heads.length) heads = [].slice.call(table.querySelectorAll('tr:first-child th,tr:first-child td'));
+    var keys = heads.map(function (h) { return String(h.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase(); });
+    var rows = [];
+    [].slice.call(table.querySelectorAll('tbody tr')).forEach(function (tr) {
+      var cells = [].slice.call(tr.querySelectorAll(':scope > td,:scope > th'));
+      if (!cells.length) return;
+      var row = {};
+      cells.forEach(function (c, i) { row[keys[i] || ('col' + i)] = c; });
+      rows.push(row);
     });
-    if (!pkgSize) {
-      var ps = t.match(/\(?(?:bottle|box|container|tube|each)[^)]*?(\d+(?:\.\d+)?)\s*(capsule|tablet|ml|gram|each|unit|inhaler)/i);
-      if (ps) pkgSize = Math.round(Number(ps[1]));
+    return rows;
+  }
+
+  // Find the side panel row for an NDC and read a labeled "<label>: a (b)".
+  function panelPairByLabel(scopeText, label) {
+    var re = new RegExp(label + '\\s*:?\\s*(\\d+)\\s*\\((\\d+)\\)', 'i');
+    var m = scopeText.match(re);
+    return m ? { pkgs: Number(m[1]), units: Number(m[2]) } : null;
+  }
+
+  // Read the active receiving dialog + NDC-matched side panel, binding ONE
+  // coherent pending item. Returns null until a coherent snapshot is readable.
+  function currentReceiveDetail() {
+    var dialog = activeReceivePanel();
+    if (!dialog) return null;
+
+    // 1) Scanned Items table in the dialog (map by headers).
+    var tables = [].slice.call(dialog.querySelectorAll('table'));
+    var rowObjs = [];
+    tables.forEach(function (tb) { rowObjs = rowObjs.concat(readTableByHeaders(tb)); });
+    // The pending row is the one with a Product Id + Currently Scanned.
+    var pend = null;
+    for (var i = 0; i < rowObjs.length; i++) {
+      var r = rowObjs[i];
+      var pidCell = r['product id'] || r['productid'] || r['product'];
+      if (pidCell && /\d{6,}/.test(pidCell.innerText || '')) { pend = r; break; }
     }
-    var unitWord = (t.match(/\d+\.?\d*\s*(Capsules?|Tablets?|mL|Grams?|Each|Units?|Inhalers?)/i) || [])[1] || 'units';
+    if (!pend) return null;
 
-    var warnings = [];
-    if (/hazardous drug|special handling|N\s*Listed Hazard/i.test(t)) warnings.push('HAZARDOUS \u2014 Special Handling');
-    if (/cold chain|refrigerat/i.test(t)) warnings.push('COLD CHAIN');
+    var productId = (((pend['product id'] || pend['productid'] || pend['product']).innerText) || '').replace(/\D/g, '');
+    var descCell = pend['description'] || pend['desc'];
+    var drug = descCell ? String(descCell.innerText || '').replace(/\s+/g, ' ').trim() : '';
+    var scannedCell = pend['currently scanned'] || pend['scanned'];
+    var scanned = scannedCell ? parsePair(scannedCell.innerText) : null;
+    var locCell = pend['suggested locations'] || pend['suggested location'] || pend['locations'];
+    var locations = locCell ? allLocationsIn(locCell.innerText) : [];
+    // If the dialog cell had no codes, fall back to the dialog's own text.
+    if (!locations.length) locations = allLocationsIn(dialog.innerText);
 
-    // If we can't resolve the essential identity, return null so the UI shows
-    // "Reading item…" rather than a stale medication.
-    if (!ndc && !drug) return null;
+    // 2) Side panel matched by NDC == productId.
+    var ordered = null, received = null, pkgSize = 0, warnings = [], unitWord = 'units';
+    var panels = [].slice.call(document.querySelectorAll('[role="dialog"],aside,section,div'))
+      .filter(function (el) {
+        if (el.closest && el.closest('#ptx7-rx-root')) return false;
+        if (el === dialog) return false;
+        var txt = el.innerText || '';
+        return productId && txt.indexOf(productId) >= 0 && /Quantity (Ordered|Received)/i.test(txt);
+      })
+      .sort(function (a, b) { return (a.innerText || '').length - (b.innerText || '').length; });
+    var sp = panels[0];
+    if (sp) {
+      var st = (sp.innerText || '').replace(/\u00a0/g, ' ');
+      ordered = panelPairByLabel(st, 'Quantity Ordered');
+      received = panelPairByLabel(st, 'Quantity Received');
+      var psz = st.match(/Package Size\s*:?\s*(\d+(?:\.\d+)?)/i);
+      if (psz) pkgSize = Math.round(Number(psz[1]));
+      if (/hazardous drug|special handling|N\s*Listed Hazard/i.test(st)) warnings.push('HAZARDOUS \u2014 Special Handling');
+      if (/cold chain|refrigerat/i.test(st)) warnings.push('COLD CHAIN');
+      var uw = st.match(/\d+\.?\d*\s*(Capsules?|Tablets?|Milliliters?|mL|Grams?|Each|Units?|Inhalers?|Sprays?)/i);
+      if (uw) unitWord = uw[1];
+      if (!drug) {
+        var dd = st.match(/([A-Z0-9][^\n]*?\((?:bottle|box|container|tube|each|carton)[^\n]*?\))/i);
+        if (dd) drug = dd[1].replace(/\s+/g, ' ').trim();
+      }
+    }
+    if (!pkgSize && scanned && scanned.pkgs > 0) pkgSize = Math.round(scanned.units / scanned.pkgs);
+
+    // Require a coherent snapshot: product id present (and, when a side panel
+    // exists, its NDC matched). Otherwise return null -> "Loading item details".
+    if (!productId) return null;
 
     return {
-      ndc: ndc, drug: drug,
-      location: locations[0] || '',   // primary (back-compat)
-      locations: locations,           // ALL suggested locations
+      ndc: productId, drug: drug,
+      location: locations[0] || '',
+      locations: locations,
       ordered: ordered, received: received, scanned: scanned,
-      pkgSize: pkgSize, unitWord: unitWord.toLowerCase(), warnings: warnings,
-      key: (ndc || '') + '|' + (drug || '')
+      pkgSize: pkgSize, unitWord: String(unitWord).toLowerCase(),
+      warnings: warnings,
+      key: productId
     };
   }
 
@@ -694,6 +733,8 @@
         var locs = (detail.locations && detail.locations.length) ? detail.locations
           : (detail.location ? [detail.location] : []);
         h += '<div class="ptx7-rx-step">SCAN LOCATION</div>';
+        // Per-item pending progress (scanned, not yet submitted).
+        h += itemProgressCard(detail, 'pending');
         if (locs.length === 0) {
           h += '<div class="ptx7-rx-loccard" style="background:#b42318">' +
             '<div class="short" style="font-size:34px">Locations unavailable</div>' +
@@ -783,6 +824,54 @@
   }
 
   // Build the medication progress card from PIMS quantities (no hard-coding).
+
+  // Per-item progress card. mode 'pending' = after scan, before location.
+  // Uses PIMS values; never invents a denominator; shows packages and (when
+  // package size is known) unit progress; distinguishes pending vs confirmed.
+  function itemProgressCard(detail, mode) {
+    var name = detail.drug || ('NDC ' + detail.ndc);
+    var ord = detail.ordered;          // {pkgs, units} ordered
+    var rec = detail.received;         // {pkgs, units} confirmed (updates after submit)
+    var scn = detail.scanned;          // {pkgs, units} currently scanned (pending)
+    var unit = detail.unitWord || 'units';
+
+    var html = '<div class="ptx7-rx-card">' +
+      '<div class="name">' + esc(name) + '</div>' +
+      '<div class="ndc">NDC ' + esc(detail.ndc) + '</div>';
+
+    // Package line.
+    if (scn && ord) {
+      html += '<div class="count">' + scn.pkgs + ' of ' + ord.pkgs + ' packages ' +
+        (mode === 'pending' ? 'scanned' : 'received') + '</div>';
+    } else if (scn && !ord) {
+      html += '<div class="count">' + scn.pkgs + ' scanned</div>' +
+        '<div class="bottles">Ordered quantity unavailable</div>';
+    } else if (rec && ord) {
+      html += '<div class="count">' + rec.pkgs + ' of ' + ord.pkgs + ' packages received</div>';
+    }
+
+    // Unit line (only when package size > 1, e.g. 100 capsules/bottle).
+    if (ord && detail.pkgSize && detail.pkgSize > 1) {
+      var confirmedUnits = rec ? rec.units : 0;
+      var pendingUnits = scn ? scn.units : 0;
+      var shown = (mode === 'pending') ? pendingUnits : confirmedUnits;
+      html += '<div class="bottles">' + shown + ' / ' + ord.units + ' ' + esc(unit) +
+        (mode === 'pending' ? ' pending' : ' confirmed') + '</div>';
+    }
+
+    // Progress bar on confirmed received vs ordered.
+    if (ord && ord.units) {
+      var frac = (rec ? rec.units : 0) / ord.units;
+      html += '<div class="ptx7-rx-barwrap"><div class="ptx7-rx-bar2" style="width:' +
+        Math.max(2, Math.min(100, Math.round(frac * 100))) + '%"></div></div>';
+    }
+
+    if (mode === 'pending') {
+      html += '<div class="bottles" style="color:#8a5a00;font-weight:900">Scan location to submit</div>';
+    }
+    html += '</div>';
+    return html;
+  }
   function medCard(prog) {
     // Idle (no pending item): never present a previous medication as current.
     var last = state.lastMed;
