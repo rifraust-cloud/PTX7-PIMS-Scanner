@@ -733,31 +733,54 @@
     return ins.filter(isVisible).find(function (el) { return !el.disabled && !el.readOnly; }) || null;
   }
 
-  function setNativeValue(el, value) {
-    var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-    var desc = Object.getOwnPropertyDescriptor(proto, 'value');
-    if (desc && desc.set) desc.set.call(el, value);
-    else el.value = value;
-  }
-
-  // Deliver the full barcode payload into PIMS. Returns the method used.
+  // Deliver the full barcode payload into PIMS by replaying it the way PIMS's
+  // scanner listener expects (reverse-engineered via DevTools):
+  //   - keypress events on `document` (it reads String.fromCharCode(e.which))
+  //   - target must NOT be an INPUT/TEXTAREA/contenteditable (else ignored)
+  //   - >= 6 chars, delivered FAST (elapsed first->last < len*30ms); a tight
+  //     synchronous loop is ~0ms, well under the threshold
+  //   - terminated by Enter (which=13)
+  //   - full payload preserved (colons/control chars/serial/lot/exp)
+  // No isTrusted requirement, so synthetic keypress events are accepted.
   function deliverScanToPims(payload) {
-    var el = pimsScanInput();
-    if (!el) return 'no-input';
-    try { el.focus(); } catch (e) {}
-    // Set the FULL payload (keep separators/serial/lot/exp — do not reduce to NDC).
-    setNativeValue(el, payload);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    // Enter on the input itself (not body) so PIMS's handler on that element fires.
-    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+    // Ensure no editable element is the event target, or PIMS ignores it.
+    try {
+      var ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) {
+        ae.blur();
+      }
+    } catch (e) {}
+
+    var target = document; // PIMS listens at the document level
+
+    function fireKeypress(ch) {
+      var code = ch.charCodeAt(0);
+      var ev;
       try {
-        el.dispatchEvent(new KeyboardEvent(type, {
-          key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true
-        }));
-      } catch (e) {}
-    });
-    return 'input:' + (el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.id || el.name || el.tagName);
+        ev = new KeyboardEvent('keypress', {
+          key: ch, charCode: code, keyCode: code, which: code,
+          bubbles: true, cancelable: true
+        });
+      } catch (e1) {
+        // Fallback for engines that ignore the KeyboardEvent 'which' init.
+        ev = document.createEvent('Event');
+        ev.initEvent('keypress', true, true);
+      }
+      // Force which/keyCode in case the constructor dropped them (WebView).
+      try {
+        Object.defineProperty(ev, 'which', { get: function () { return code; } });
+        Object.defineProperty(ev, 'keyCode', { get: function () { return code; } });
+        Object.defineProperty(ev, 'charCode', { get: function () { return code; } });
+      } catch (e2) {}
+      target.dispatchEvent(ev);
+    }
+
+    // Fast synchronous burst = tiny elapsed time (passes len*30ms rule).
+    for (var i = 0; i < payload.length; i++) fireKeypress(payload.charAt(i));
+    // Terminator: Enter (which=13).
+    fireKeypress(String.fromCharCode(13));
+
+    return 'doc-keypress x' + payload.length;
   }
 
   // Diagnostic probe: list PIMS inputs so we can see what PIMS listens on.
@@ -813,12 +836,22 @@
     if (state.phase === 'NDC') {
       setDebug('NDC scan: ' + scanned.length + 'ch');
       onNdcScan(scanned);
+    } else if (state.phase === 'RECEIVE') {
+      // The PM86 only yields scan data via our focused input, so we capture it;
+      // then replay the FULL payload as document keypress events the way PIMS's
+      // scanner listener accepts (item scan OR location scan — PIMS decides
+      // which based on its own receive state). Do NOT reduce to NDC.
+      var method = deliverScanToPims(scanned);
+      lastScanInfo.method = method;
+      setDebug('deliver ' + scanned.length + 'ch via ' + method);
+      // Reflect PIMS's resulting state (item accepted -> location, or submitted).
+      setTimeout(render, 300);
+      setTimeout(render, 900);
+      setTimeout(render, 1600);
     } else {
-      // PO/RECEIVE: the assistant does NOT own the scan. PIMS receives it
-      // directly; this branch should not normally fire (capture input is
-      // inert). If it does, do nothing destructive.
-      lastScanInfo.method = 'observed-only (PIMS owns scan)';
-      setDebug('observed ' + scanned.length + 'ch (PIMS owns scan)');
+      // PO selection is tap-only.
+      lastScanInfo.method = 'ignored (PO select is tap-only)';
+      setDebug('Tap the correct PO above (or SCAN A DIFFERENT NDC).');
     }
   }
 
@@ -831,13 +864,15 @@
   function scaleToScreen() { /* intentionally no-op (do not touch viewport) */ }
   function restoreViewport() { /* no-op */ }
 
-  // The assistant OWNS the scanner only during NDC lookup (to drive PO lookup).
-  // In PO selection and RECEIVE, PIMS owns the scan: we must not focus our
-  // capture input or consume the event, so the original scanner stream reaches
-  // PIMS exactly as it does for a Zebra. (Mirrors v2.26.1: it only intercepts
-  // during the PO chooser / Put-Away, never during ordinary receiving.)
+  // On the PM86 the scanner only yields data into a focused input, so the
+  // assistant must capture during NDC lookup AND during RECEIVE. The crucial
+  // detail (from the reverse-engineered PIMS listener): the capture input is
+  // ONLY focused momentarily to receive the wedge text; delivery to PIMS is
+  // then done via document keypress events with no editable target. During PO
+  // selection the assistant does not own the scan (tap-only).
   function assistantOwnsScan() {
-    return state.phase === 'NDC' && !state.releaseFocus;
+    if (state.releaseFocus) return false;        // diagnostic override
+    return state.phase === 'NDC' || state.phase === 'RECEIVE';
   }
   function releaseFocusToPims() {
     try { if (document.activeElement === capture) capture.blur(); } catch (e) {}
