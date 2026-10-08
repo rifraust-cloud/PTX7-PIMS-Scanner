@@ -1250,7 +1250,7 @@
       'route: ' + location.pathname + location.search,
       'phase: ' + state.phase,
       'focusMode: ' + (state.releaseFocus ? 'RELEASED (scan goes to PIMS)' :
-        ((window.PTX7Host && window.PTX7Host.usesNativeCapture && window.PTX7Host.usesNativeCapture()) ?
+        ((window.PTX7Host && window.PTX7Host.requestScanFocus) ?
           'CAPTURED (native Android field)' : 'CAPTURED (WebView overlay input)')),
       'activeElement: ' + aeDesc,
       'currentPo: ' + (currentPo() || '(none)'),
@@ -1365,12 +1365,18 @@
     if (root.style.display !== 'block') return;
     if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
     try {
-      if (window.PTX7Host && window.PTX7Host.usesNativeCapture && window.PTX7Host.usesNativeCapture()) {
+      // This asset runs inside the Android app. If the host exposes a native
+      // focus request, it is the only scanner owner; never fall back to the
+      // WebView input, which split the leading HID character into PIMS.
+      if (window.PTX7Host && window.PTX7Host.requestScanFocus) {
         releaseFocusToPims();
-        if (window.PTX7Host.requestScanFocus) window.PTX7Host.requestScanFocus();
+        window.PTX7Host.requestScanFocus();
         return;
       }
-    } catch (e) {}
+    } catch (e) {
+      setDebug('native scan focus request failed: ' + (e.message || e));
+      return;
+    }
     try { capture.focus({ preventScroll: true }); } catch (e1) { try { capture.focus(); } catch (e2) {} }
   }
   capture.addEventListener('blur', function () {

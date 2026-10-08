@@ -2780,6 +2780,8 @@ class MainActivity : ComponentActivity() {
             layoutParams = ViewGroup.LayoutParams(1, 1)
             alpha = 0.01f
             isSingleLine = true
+            isFocusable = true
+            isFocusableInTouchMode = true
             isCursorVisible = false
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setTextColor(android.graphics.Color.TRANSPARENT)
@@ -2837,8 +2839,20 @@ class MainActivity : ComponentActivity() {
         if (!::hardwareScanCapture.isInitialized || !::webView.isInitialized) return
         if (receivingModeOpen && assistantOwnsScanNative) {
             hardwareScanCapture.visibility = View.VISIBLE
+            hardwareScanCapture.bringToFront()
+            hardwareScanCapture.isFocusable = true
+            hardwareScanCapture.isFocusableInTouchMode = true
             hardwareScanCapture.requestFocus()
+            hardwareScanCapture.requestFocusFromTouch()
             hardwareScanCapture.setSelection(hardwareScanCapture.text.length)
+            val inputMethod = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            inputMethod.hideSoftInputFromWindow(hardwareScanCapture.windowToken, 0)
+            hardwareScanCapture.postDelayed({
+                if (receivingModeOpen && assistantOwnsScanNative && !hardwareScanCapture.hasFocus()) {
+                    hardwareScanCapture.requestFocus()
+                    hardwareScanCapture.requestFocusFromTouch()
+                }
+            }, 60L)
         } else {
             hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
             updatingHardwareScanCapture = true
