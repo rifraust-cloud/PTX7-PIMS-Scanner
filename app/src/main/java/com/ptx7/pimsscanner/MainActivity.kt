@@ -3106,6 +3106,7 @@ class MainActivity : ComponentActivity() {
                     receivingModeOpen = false
                     assistantOwnsScanNative = true
                     scanBuffer.setLength(0)
+                    if (::webView.isInitialized) findViewById<Button>(R.id.receiveModeButton).text = "RETURN TO RECEIVING"
                     updateHardwareScanFocus()
                 }
             }

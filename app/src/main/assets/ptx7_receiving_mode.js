@@ -371,6 +371,144 @@
     return rows;
   }
 
+  function tableColumnIndex(table, bodyCells, labels) {
+    var headers = [].slice.call(table.querySelectorAll('thead th,[role="columnheader"]'));
+    var header = headers.find(function(cell) {
+      var key = normalizedLabel(cell.innerText || cell.textContent || '');
+      return labels.indexOf(key) >= 0;
+    });
+    if (!header || !bodyCells.length) return -1;
+    var hx = header.getBoundingClientRect().left + header.getBoundingClientRect().width / 2;
+    var best = -1, distance = Infinity;
+    bodyCells.forEach(function(cell, index) {
+      var rect = cell.getBoundingClientRect(); var cx = rect.left + rect.width / 2;
+      if (Math.abs(cx - hx) < distance) { distance = Math.abs(cx - hx); best = index; }
+    });
+    return best;
+  }
+
+  function displayNumber(value) {
+    var text = String(value == null ? '' : value).replace(/,/g, '').trim();
+    return /^-?\d+(?:\.\d+)?$/.test(text) ? Number(text) : null;
+  }
+
+  function packageDescription(description) {
+    var match = String(description || '').match(/\((Bottle|Box|Container|Tube|Each|Carton)[^,]*,\s*(\d+(?:\.\d+)?)\s+([^)]+)\)/i);
+    if (!match) return { size: 0, unit: 'units', type: 'package' };
+    return { size: Number(match[2]), unit: match[3].replace(/\s+/g, ' ').trim().toLowerCase(), type: match[1].toLowerCase() };
+  }
+
+  // Observe the PIMS PO table after an item scan but before Submit Receives.
+  // Uses visible header labels; never touches React internals.
+  function currentQueuedReceiveDetail() {
+    state.queuedItemError = '';
+    var candidates = [];
+    [].slice.call(document.querySelectorAll('table,[role="table"],[role="grid"]')).forEach(function(table) {
+      if (table.closest && table.closest('#ptx7-rx-root')) return;
+      var tableText = String(table.innerText || '');
+      if (!/Currently Scanned/i.test(tableText) || !/Purchased/i.test(tableText) || !/Received/i.test(tableText)) return;
+      [].slice.call(table.querySelectorAll('tbody tr,[role="row"]')).forEach(function(row) {
+        var cells = [].slice.call(row.querySelectorAll(':scope > td,:scope > th,:scope > [role="cell"],:scope > [role="gridcell"]'));
+        if (cells.length < 4) return;
+        var currentIndex = tableColumnIndex(table, cells, ['currentlyscanned']);
+        var descriptionIndex = tableColumnIndex(table, cells, ['description']);
+        var purchasedIndex = tableColumnIndex(table, cells, ['purchased','qtypurchased']);
+        var receivedIndex = tableColumnIndex(table, cells, ['received','qtyreceived']);
+        var productIndex = tableColumnIndex(table, cells, ['productid','ndc']);
+        var locationsIndex = tableColumnIndex(table, cells, ['suggestedlocations','suggestedlocation']);
+        if (currentIndex < 0 || descriptionIndex < 0 || purchasedIndex < 0 || receivedIndex < 0) return;
+        var rawScanned = String(cells[currentIndex].innerText || '').trim();
+        var pair = parsePair(rawScanned);
+        var scannedNumber = pair ? pair.pkgs : displayNumber(rawScanned);
+        if (!Number.isFinite(scannedNumber) || scannedNumber <= 0) return;
+        var description = String(cells[descriptionIndex].innerText || '').replace(/\s+/g,' ').trim();
+        var packaging = packageDescription(description);
+        var purchasedUnits = displayNumber(cells[purchasedIndex].innerText);
+        var receivedUnits = displayNumber(cells[receivedIndex].innerText);
+        var scanned = pair || { pkgs: scannedNumber, units: packaging.size > 0 ? scannedNumber * packaging.size : scannedNumber };
+        var ordered = Number.isFinite(purchasedUnits) ? {
+          units: purchasedUnits,
+          pkgs: packaging.size > 0 ? Math.ceil(purchasedUnits / packaging.size) : null
+        } : null;
+        var received = Number.isFinite(receivedUnits) ? {
+          units: receivedUnits,
+          pkgs: packaging.size > 0 ? Math.floor(receivedUnits / packaging.size) : null
+        } : null;
+        var productId = productIndex >= 0 ? String(cells[productIndex].innerText || '').replace(/\D/g,'') : '';
+        if (!productId) productId = scanToNdc11(lastScanInfo.deliveredEscaped || '') || state.ndc || '';
+        var locations = locationsIndex >= 0 ? allLocationsIn(cells[locationsIndex].innerText) : [];
+        candidates.push({
+          stage:'QUEUED', ndc:productId, drug:description, location:locations[0] || '', locations:locations,
+          ordered:ordered, received:received, scanned:scanned,
+          pkgSize:packaging.size, packageType:packaging.type, unitWord:packaging.unit,
+          warnings:[], key:(productId || description) + '|queued'
+        });
+      });
+    });
+    var unique = candidates.filter(function(candidate, index, array) {
+      var signature = receiveTraceSignature(candidate);
+      return array.findIndex(function(other){ return receiveTraceSignature(other) === signature; }) === index;
+    });
+    if (unique.length > 1) {
+      state.queuedItemError = 'Multiple PIMS rows have Currently Scanned quantities. View PIMS before submitting.';
+      return null;
+    }
+    return unique[0] || null;
+  }
+
+  function pimsValidationError() {
+    return [].slice.call(document.querySelectorAll('[role="alert"],[data-testid*="error"],.awsui_alert_1i0s3'))
+      .filter(function(element){ return !(element.closest && element.closest('#ptx7-rx-root')) && isVisible(element); })
+      .map(function(element){ return String(element.innerText || element.textContent || '').replace(/\s+/g,' ').trim(); })
+      .find(function(text){ return text && /error|invalid|failed|unable|cannot|not allowed|required/i.test(text); }) || '';
+  }
+
+  function pimsSubmitButton() {
+    return document.querySelector('button[data-testid="submit-receives"]');
+  }
+
+  function progressReceivedNumber(progress) {
+    var value = progress ? Number(progress.received) : NaN;
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function submitReceivesThroughPims() {
+    if (state.submitProcessing) return;
+    var button = pimsSubmitButton();
+    var detail = currentReceiveDetail();
+    if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') {
+      state.submitError = 'PIMS Submit Receives is unavailable or disabled. Use View PIMS.';
+      render(); return;
+    }
+    if (!detail || detail.stage !== 'QUEUED') {
+      state.submitError = detail && detail.stage === 'LOCATION' ?
+        'A location is already required. Scan a displayed location.' :
+        'No single queued medication is available to submit.';
+      render(); return;
+    }
+    state.submitProcessing = true;
+    state.submitError = '';
+    state.pimsValidationError = '';
+    state.pendingConfirmation = {
+      productKey: detail.key,
+      medication: detail,
+      baselinePoReceived: progressReceivedNumber(currentProgress()),
+      startedAt: Date.now(),
+      waitingForLocation: false
+    };
+    clearTimeout(state.submitTimer);
+    render();
+    // Stable public DOM behavior verified in DevTools. Resolve and click once;
+    // never call React props/minified closures or recreate PIMS requests.
+    button.click();
+    state.submitTimer = setTimeout(function() {
+      if (!state.submitProcessing) return;
+      state.submitProcessing = false;
+      state.submitError = 'PIMS did not expose a location prompt or confirmation. Review PIMS; do not press Submit repeatedly.';
+      render();
+    }, 8000);
+  }
+
   // Find the side panel row for an NDC and read a labeled "<label>: a (b)".
   function panelPairByLabel(scopeText, label) {
     var re = new RegExp(label + '\\s*:?\\s*(\\d+)\\s*\\((\\d+)\\)', 'i');
@@ -382,7 +520,7 @@
   // coherent pending item. Returns null until a coherent snapshot is readable.
   function currentReceiveDetail() {
     var dialog = activeReceivePanel();
-    if (!dialog) return null;
+    if (!dialog) return currentQueuedReceiveDetail();
 
     // 1) Scanned Items table in the dialog (map by headers).
     var tables = [].slice.call(dialog.querySelectorAll('table'));
@@ -440,6 +578,7 @@
     if (!productId) return null;
 
     return {
+      stage: 'LOCATION',
       ndc: productId, drug: drug,
       location: locations[0] || '',
       locations: locations,
@@ -579,7 +718,22 @@
     lastPhysicalScanSource: '',
     forwardSequence: 0,
     captureStartedAt: 0,
-    captureEventCount: 0
+    captureEventCount: 0,
+    resolvingItem: false,
+    resolveTimer: null,
+    lastMed: null,
+    lastSpokenLoc: '',
+    confirmedUntil: 0,
+    confirmedTimer: null,
+    uiState: '',
+    settingsOpen: false,
+    submitProcessing: false,
+    submitTimer: null,
+    submitError: '',
+    pendingConfirmation: null,
+    workSignature: '',
+    queuedItemError: '',
+    pimsValidationError: ''
   };
 
   // ---------------------------------------------------------------------------
@@ -691,6 +845,103 @@
 
   (document.body || document.documentElement).appendChild(root);
 
+  // Fixed receiving layout. These nodes are created once; render() updates
+  // text/visibility only so scanning focus and screen geometry stay stable.
+  root.style.overflow = 'hidden';
+  STYLE.textContent +=
+    '#ptx7-rx-bar{position:absolute;left:0;right:0;top:0;height:68px;z-index:5}' +
+    '#ptx7-rx-bar .title{display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05}' +
+    '#ptx7-rx-header-po{font-size:16px;font-weight:800;min-height:18px;opacity:.9}' +
+    '#ptx7-rx-body{position:absolute;left:0;right:0;top:68px;bottom:126px;padding:14px 16px;overflow:hidden;display:block}' +
+    '#ptx7-rx-fixed{height:100%;display:grid;grid-template-rows:52px minmax(138px,auto) minmax(0,1fr);gap:10px}' +
+    '#ptx7-rx-status{min-height:52px;padding:8px 12px;border-radius:10px;background:#eef3f6;color:#344054;font-size:18px;font-weight:800;overflow:auto}' +
+    '#ptx7-rx-status[data-kind="ok"]{background:#e6f6eb;color:#176b35}' +
+    '#ptx7-rx-status[data-kind="processing"]{background:#e9f4ff;color:#075985}' +
+    '#ptx7-rx-status[data-kind="error"]{background:#fff1f0;color:#b42318}' +
+    '#ptx7-rx-main{border:2px solid #cdd5db;border-radius:16px;padding:12px 16px;background:#fff;overflow:hidden}' +
+    '#ptx7-rx-instruction{font-size:clamp(28px,3vw,38px);font-weight:900;text-align:center;color:#172b3a;line-height:1.05;min-height:42px}' +
+    '#ptx7-rx-med-name{font-size:clamp(27px,2.7vw,36px);font-weight:900;color:#172b3a;line-height:1.12;max-height:82px;overflow:auto;margin-top:5px}' +
+    '#ptx7-rx-med-detail{font-size:clamp(16px,1.7vw,22px);font-weight:800;color:#59636b;min-height:24px;margin-top:4px}' +
+    '#ptx7-rx-progress-primary{font-size:clamp(38px,4.5vw,58px);font-weight:900;color:#087f3f;text-align:center;line-height:1.05;margin-top:8px}' +
+    '#ptx7-rx-progress-secondary{font-size:clamp(18px,2vw,25px);font-weight:800;color:#59636b;text-align:center;min-height:28px;margin-top:3px}' +
+    '#ptx7-rx-progress-track{height:22px;border-radius:11px;background:#e6eaee;overflow:hidden;margin-top:8px}' +
+    '#ptx7-rx-progress-fill{height:100%;width:0;background:#087f3f;border-radius:11px}' +
+    '#ptx7-rx-work{border:2px solid #d7dfe5;border-radius:16px;background:#f9fbfc;overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr)}' +
+    '#ptx7-rx-work-title{font-size:clamp(24px,2.6vw,34px);font-weight:900;text-align:center;padding:10px;color:#005a61}' +
+    '#ptx7-rx-work-scroll{overflow:auto;padding:4px 12px 12px;min-height:0}' +
+    '.ptx7-rx-location-static{background:#087f3f;color:#fff;border-radius:14px;padding:14px;text-align:center;margin:8px 0}' +
+    '.ptx7-rx-location-static .short{font-size:clamp(36px,4.3vw,58px);font-weight:900;line-height:1.05}' +
+    '.ptx7-rx-location-static .full{font-size:clamp(18px,2vw,26px);font-weight:900;margin-top:4px}' +
+    '#ptx7-rx-po-list{display:grid;gap:10px}' +
+    '#ptx7-rx-po-list button{min-height:66px;border:3px solid #007a83;border-radius:13px;background:#fff;color:#005a61;font-size:24px;font-weight:900}' +
+    '#ptx7-rx-fixed-controls{position:absolute;left:0;right:0;bottom:38px;height:88px;padding:8px 16px;background:#fff;border-top:2px solid #d7dfe5;display:grid;grid-template-columns:1fr 1.35fr;gap:10px}' +
+    '#ptx7-rx-fixed-controls button{min-height:68px;border:0;border-radius:13px;background:#007a83;color:#fff;font-size:clamp(19px,2vw,26px);font-weight:900}' +
+    '#ptx7-rx-fixed-controls button.secondary{background:#fff;color:#005a61;border:3px solid #007a83}' + '#ptx7-rx-submit:disabled{background:#98a2b3;color:#eef1f3;cursor:not-allowed}' +
+    '#ptx7-rx-foot{position:absolute;left:0;right:0;bottom:0;height:38px;padding:7px 12px;background:#f0f3f5;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px}' +
+    '#ptx7-rx-settings-overlay{position:absolute;inset:68px 0 0;background:#fff;z-index:9;padding:16px;overflow:auto;display:none}' +
+    '#ptx7-rx-settings-overlay.open{display:block}' +
+    '.ptx7-rx-setting-row{display:grid;grid-template-columns:180px 1fr;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #d7dfe5;font-size:19px;font-weight:900}' +
+    '.ptx7-rx-setting-row select{height:52px;font-size:18px;border:2px solid #98a2b3;border-radius:9px;background:#fff;padding:4px}' +
+    '#ptx7-rx-settings-overlay button{min-height:58px;border:0;border-radius:11px;background:#007a83;color:#fff;font-size:20px;font-weight:900;padding:8px 14px;margin:8px 4px}' +
+    '#ptx7-rx-settings-diag{display:none;width:100%;height:220px;font:12px monospace;white-space:pre;overflow:auto}' +
+    '#ptx7-rx-home-static[hidden],#ptx7-rx-fixed[hidden]{display:none}' +
+    '#ptx7-rx-home-static{height:100%;display:flex;align-items:center;justify-content:center}' +
+    '#ptx7-rx-home-static button{width:100%;min-height:330px;border:0;border-radius:24px;background:#007a83;color:#fff;font-size:44px;font-weight:900;box-shadow:0 7px 0 #005a61}' +
+    '@media(max-width:700px){#ptx7-rx-body{padding:10px;bottom:118px}#ptx7-rx-fixed{grid-template-rows:52px minmax(145px,auto) minmax(0,1fr)}#ptx7-rx-fixed-controls{height:80px;padding:6px 10px;gap:6px}#ptx7-rx-fixed-controls button{min-height:62px}.ptx7-rx-setting-row{grid-template-columns:1fr}}';
+
+  bar.querySelector('.title').innerHTML = '<span>Receiving</span><span id="ptx7-rx-header-po"></span>';
+  body.innerHTML =
+    '<section id="ptx7-rx-home-static"><button type="button" id="ptx7-rx-home-start">\uD83D\uDCE6<br>RECEIVING<br><small style="font-size:20px">Tap to begin</small></button></section>' +
+    '<section id="ptx7-rx-fixed" hidden>' +
+      '<div id="ptx7-rx-status" data-kind="ok">Ready</div>' +
+      '<section id="ptx7-rx-main">' +
+        '<div id="ptx7-rx-instruction">Scan medication</div>' +
+        '<div id="ptx7-rx-med-name">No medication pending</div>' +
+        '<div id="ptx7-rx-med-detail"></div>' +
+        '<div id="ptx7-rx-progress-primary">Ready</div>' +
+        '<div id="ptx7-rx-progress-secondary">PIMS is the source of truth</div>' +
+        '<div id="ptx7-rx-progress-track"><div id="ptx7-rx-progress-fill"></div></div>' +
+      '</section>' +
+      '<section id="ptx7-rx-work"><div id="ptx7-rx-work-title">Scan medication</div><div id="ptx7-rx-work-scroll"></div></section>' +
+    '</section>';
+
+  var controls = document.createElement('div');
+  controls.id = 'ptx7-rx-fixed-controls';
+  controls.innerHTML = '<button type="button" class="secondary" id="ptx7-rx-view-pims">VIEW PIMS</button>' +
+    '<button type="button" id="ptx7-rx-submit">SUBMIT RECEIVES</button>';
+  root.insertBefore(controls, foot);
+
+  var settingsOverlay = document.createElement('section');
+  settingsOverlay.id = 'ptx7-rx-settings-overlay';
+  settingsOverlay.innerHTML = '<h2 style="font-size:30px;margin:0 0 12px">Receiving settings</h2>' +
+    '<div class="ptx7-rx-setting-row"><label for="ptx7-rx-set-voice-on">Location voice</label><select id="ptx7-rx-set-voice-on"><option value="on">On</option><option value="off">Muted</option></select></div>' +
+    '<div class="ptx7-rx-setting-row"><label for="ptx7-rx-set-voice-name">Voice</label><select id="ptx7-rx-set-voice-name"></select></div>' +
+    '<div class="ptx7-rx-setting-row"><label for="ptx7-rx-set-voice-rate">Speech speed</label><select id="ptx7-rx-set-voice-rate"><option value="0.85">0.85\u00d7</option><option value="1">1.00\u00d7</option><option value="1.15">1.15\u00d7</option><option value="1.3">1.30\u00d7</option></select></div>' +
+    '<div class="ptx7-rx-setting-row"><label for="ptx7-rx-set-voice-volume">Speech volume</label><select id="ptx7-rx-set-voice-volume"><option value="0.5">Low</option><option value="0.75">Medium</option><option value="1">High</option></select></div>' +
+    '<button type="button" id="ptx7-rx-set-preview">\uD83D\uDD0A PREVIEW</button>' +
+    '<button type="button" id="ptx7-rx-set-diag">SHOW DIAGNOSTIC</button>' +
+    '<textarea readonly id="ptx7-rx-settings-diag"></textarea>' +
+    '<button type="button" id="ptx7-rx-settings-done">DONE</button>';
+  root.appendChild(settingsOverlay);
+
+  var fixedUi = {
+    home: document.getElementById('ptx7-rx-home-static'),
+    fixed: document.getElementById('ptx7-rx-fixed'),
+    headerPo: document.getElementById('ptx7-rx-header-po'),
+    status: document.getElementById('ptx7-rx-status'),
+    instruction: document.getElementById('ptx7-rx-instruction'),
+    medName: document.getElementById('ptx7-rx-med-name'),
+    medDetail: document.getElementById('ptx7-rx-med-detail'),
+    progressPrimary: document.getElementById('ptx7-rx-progress-primary'),
+    progressSecondary: document.getElementById('ptx7-rx-progress-secondary'),
+    progressFill: document.getElementById('ptx7-rx-progress-fill'),
+    workTitle: document.getElementById('ptx7-rx-work-title'),
+    workScroll: document.getElementById('ptx7-rx-work-scroll'),
+    controls: controls,
+    submit: document.getElementById('ptx7-rx-submit'),
+    settings: settingsOverlay
+  };
+
   // ---------------------------------------------------------------------------
   // Audio feedback (Web Audio, no assets)
   // ---------------------------------------------------------------------------
@@ -720,12 +971,17 @@
   var VOICE_ON_KEY = 'ptx7_rx_voice_on';
   var VOICE_NAME_KEY = 'ptx7_rx_voice_name';
   var VOICE_RATE_KEY = 'ptx7_rx_voice_rate';
+  var VOICE_VOLUME_KEY = 'ptx7_rx_voice_volume';
   function voiceEnabled() {
     try { return localStorage.getItem(VOICE_ON_KEY) !== 'false'; } catch (e) { return true; }
   }
   function voiceRate() {
     var v = 1; try { v = Number(localStorage.getItem(VOICE_RATE_KEY) || 1); } catch (e) {}
     return [0.85, 1, 1.15, 1.3].indexOf(v) >= 0 ? v : 1;
+  }
+  function voiceVolume() {
+    var value = 1; try { value = Number(localStorage.getItem(VOICE_VOLUME_KEY) || 1); } catch (e) {}
+    return [0.5, 0.75, 1].indexOf(value) >= 0 ? value : 1;
   }
   function availableVoices() {
     if (!('speechSynthesis' in window)) return [];
@@ -760,6 +1016,7 @@
       window.speechSynthesis.cancel();  // cancel outdated speech
       var u = new SpeechSynthesisUtterance(spokenLocation(loc));
       u.rate = voiceRate();
+      u.volume = voiceVolume();
       var v = selectedVoice(); if (v) u.voice = v;
       window.speechSynthesis.speak(u);
     } catch (e) {}
@@ -771,6 +1028,7 @@
       window.speechSynthesis.cancel();
       var u = new SpeechSynthesisUtterance(String(text || ''));
       u.rate = voiceRate();
+      u.volume = voiceVolume();
       var v = selectedVoice(); if (v) u.voice = v;
       window.speechSynthesis.speak(u);
     } catch (e) {}
@@ -795,141 +1053,245 @@
   //   - Drug pending     -> big "SCAN LOCATION" + suggested location + drug
   //   - After submit     -> brief success, then back to "SCAN MEDICATION"
   // ---------------------------------------------------------------------------
-  function render() {
-    var h = '';
-    var showExit = true;
+  function setUiText(element, value) {
+    value = String(value == null ? '' : value);
+    if (element.textContent !== value) element.textContent = value;
+  }
 
-    if (state.phase === 'HOME') {
-      showExit = false;
-      h += '<div class="ptx7-rx-sub">Select a workflow</div>';
-      h += '<div id="ptx7-rx-home-tile" role="button">' +
-        '<div class="icon">\uD83D\uDCE6</div>' +
-        '<div class="lbl">RECEIVING</div>' +
-        '<div class="hint">Tap to begin</div></div>';
+  function setUiStatus(message, kind) {
+    setUiText(fixedUi.status, message);
+    fixedUi.status.dataset.kind = kind || '';
+  }
 
-    } else if (state.phase === 'NDC') {
-      h += '<div class="ptx7-rx-step">STEP 1 \u00b7 FIND PO</div>';
-      h += '<div class="ptx7-rx-head">Scan a medication NDC</div>';
-      h += scanBox('SCAN NDC');
-      h += '<div class="ptx7-rx-sub">Scan an NDC to look up its purchase orders.</div>';
+  function setProgress(detail, pending) {
+    if (!detail) {
+      setUiText(fixedUi.medName, 'No medication pending');
+      setUiText(fixedUi.medDetail, state.lastMed && state.lastMed.drug ?
+        'Last confirmed: ' + state.lastMed.drug : 'Scan an item to load PIMS medication details');
+      setUiText(fixedUi.progressPrimary, 'Ready');
+      setUiText(fixedUi.progressSecondary, 'Medication progress appears after PIMS accepts the item');
+      fixedUi.progressFill.style.width = '0%';
+      return;
+    }
+    var ord = detail.ordered, rec = detail.received, scn = detail.scanned;
+    var shownReceived = rec || { pkgs: 0, units: 0 };
+    var pendingPkgs = pending && scn ? scn.pkgs : 0;
+    var pendingUnits = pending && scn ? scn.units : 0;
+    // PIMS can include Currently Scanned inside Quantity Received before the
+    // location is submitted. Subtract pending so it is never double-counted.
+    var confirmedPkgs = rec ? Math.max(0, rec.pkgs - pendingPkgs) : 0;
+    var confirmedUnits = rec ? Math.max(0, rec.units - pendingUnits) : 0;
+    setUiText(fixedUi.medName, detail.drug || ('NDC ' + detail.ndc));
+    var packageText = detail.pkgSize ? '  •  Package size ' + detail.pkgSize + ' ' + (detail.unitWord || 'units') : '';
+    setUiText(fixedUi.medDetail, 'NDC ' + detail.ndc + packageText);
+    if (ord) {
+      setUiText(fixedUi.progressPrimary, pending ?
+        confirmedPkgs + ' confirmed + ' + pendingPkgs + ' pending' :
+        shownReceived.pkgs + ' of ' + ord.pkgs + ' packages');
+      setUiText(fixedUi.progressSecondary, pending ?
+        confirmedUnits + ' confirmed + ' + pendingUnits + ' pending of ' + ord.units + ' ' + (detail.unitWord || 'units') :
+        shownReceived.units + ' of ' + ord.units + ' ' + (detail.unitWord || 'units'));
+      fixedUi.progressFill.style.width = Math.max(0, Math.min(100,
+        Math.round((confirmedUnits / Math.max(1, ord.units)) * 100))) + '%';
+    } else if (scn) {
+      setUiText(fixedUi.progressPrimary, scn.pkgs + (scn.pkgs === 1 ? ' package scanned' : ' packages scanned'));
+      setUiText(fixedUi.progressSecondary, scn.units + ' ' + (detail.unitWord || 'units') +
+        (pending ? ' pending; expected quantity unavailable' : ''));
+      fixedUi.progressFill.style.width = '0%';
+    } else {
+      setUiText(fixedUi.progressPrimary, pending ? 'Item pending' : 'Received');
+      setUiText(fixedUi.progressSecondary, 'PIMS quantity details unavailable');
+      fixedUi.progressFill.style.width = '0%';
+    }
+  }
 
-    } else if (state.phase === 'PO') {
-      h += '<div class="ptx7-rx-step">STEP 2 \u00b7 SELECT PO</div>';
-      h += '<div class="ptx7-rx-head">' + esc(state.drug || ('NDC ' + state.ndc)) + '</div>';
-      h += '<div class="ptx7-rx-sub">Tap the correct purchase order.</div>';
+  function setWorkContent(signature, build) {
+    if (state.workSignature === signature) return;
+    state.workSignature = signature;
+    fixedUi.workScroll.replaceChildren();
+    build(fixedUi.workScroll);
+  }
+
+  function appendScanCue(container, label) {
+    var cue = document.createElement('div');
+    cue.className = 'ptx7-rx-scanbox';
+    var glyph = document.createElement('div'); glyph.className = 'glyph'; glyph.textContent = '|||\u2009||\u2009|\u2009|||';
+    var text = document.createElement('div'); text.className = 'label'; text.textContent = label;
+    cue.append(glyph, text); container.appendChild(cue);
+  }
+
+  function renderPoChoices() {
+    var signature = 'po|' + state.poPollTries + '|' + state.pos.map(function(p){return p.po + ':' + p.receivable;}).join('|');
+    setWorkContent(signature, function(container) {
+      var list = document.createElement('div'); list.id = 'ptx7-rx-po-list';
       if (!state.pos.length) {
-        h += '<div class="ptx7-rx-confirm bad">Looking up purchase orders\u2026' +
-          '<span class="meta">If none appear, scan the NDC again.</span></div>';
+        var message = document.createElement('div'); message.className = 'ptx7-rx-confirm bad';
+        message.textContent = state.poPollTries > 20 ? 'No receivable purchase orders detected. View PIMS or scan a different NDC.' : 'Looking up purchase orders…';
+        list.appendChild(message);
       } else {
-        state.pos.forEach(function (p, i) {
-          h += '<button class="ptx7-rx-btn ptx7-rx-po-btn" type="button" data-po="' + i + '">' +
-            esc(p.po) + '<span class="meta">Receivable: ' + esc(p.receivable) + '</span></button>';
+        state.pos.forEach(function(p) {
+          var button = document.createElement('button'); button.type = 'button';
+          button.textContent = p.po + (p.receivable ? '   •   Receivable: ' + p.receivable : '');
+          button.onclick = function(){ choosePo(p); };
+          list.appendChild(button);
         });
       }
-      h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-rescan">SCAN A DIFFERENT NDC</button>';
+      var rescan = document.createElement('button'); rescan.type = 'button';
+      rescan.textContent = 'SCAN A DIFFERENT NDC';
+      rescan.onclick = startNdcPhase; list.appendChild(rescan); container.appendChild(list);
+    });
+  }
 
-    } else { // RECEIVE
+  function renderLocations(detail) {
+    var locations = detail.locations || [];
+    var signature = 'locations|' + detail.key + '|' + locations.join('|') + '|' + (detail.warnings || []).join('|');
+    setWorkContent(signature, function(container) {
+      if (!locations.length) {
+        var unavailable = document.createElement('div'); unavailable.className = 'ptx7-rx-confirm bad';
+        unavailable.textContent = 'Locations unavailable. View PIMS to continue safely.';
+        container.appendChild(unavailable); return;
+      }
+      locations.forEach(function(location) {
+        var card = document.createElement('div'); card.className = 'ptx7-rx-location-static';
+        var short = document.createElement('div'); short.className = 'short'; short.textContent = shortLoc(location);
+        var full = document.createElement('div'); full.className = 'full'; full.textContent = location;
+        card.append(short, full); container.appendChild(card);
+      });
+      (detail.warnings || []).forEach(function(warning) {
+        var box = document.createElement('div'); box.className = 'ptx7-rx-warn'; box.textContent = '⚠ ' + warning; container.appendChild(box);
+      });
+      appendScanCue(container, 'SCAN LOCATION');
+    });
+  }
+
+  function render() {
+    var isHome = state.phase === 'HOME';
+    fixedUi.home.hidden = !isHome;
+    fixedUi.fixed.hidden = isHome;
+    fixedUi.controls.style.display = isHome ? 'none' : 'grid';
+    fixedUi.submit.disabled = true;
+    fixedUi.submit.textContent = 'SUBMIT RECEIVES';
+    if (isHome) {
+      setUiText(fixedUi.headerPo, '');
+    } else if (state.phase === 'NDC') {
+      setUiText(fixedUi.headerPo, 'Find purchase order');
+      setUiStatus('Scanner ready. Scan a medication NDC.', 'ok');
+      setUiText(fixedUi.instruction, 'Scan medication');
+      setProgress(null, false);
+      setUiText(fixedUi.workTitle, 'Medication barcode');
+      setWorkContent('ndc-ready', function(container){ appendScanCue(container, 'SCAN NDC'); });
+    } else if (state.phase === 'PO') {
+      setUiText(fixedUi.headerPo, 'Select purchase order');
+      setUiStatus(state.pos.length ? 'Select the correct receivable PO.' : 'Looking up purchase orders…', state.pos.length ? 'ok' : 'processing');
+      setUiText(fixedUi.instruction, 'Select purchase order');
+      setUiText(fixedUi.medName, state.drug || ('NDC ' + state.ndc));
+      setUiText(fixedUi.medDetail, state.ndc ? 'NDC ' + state.ndc : 'Waiting for PIMS result');
+      setUiText(fixedUi.progressPrimary, state.pos.length ? state.pos.length + ' PO option' + (state.pos.length === 1 ? '' : 's') : 'Loading');
+      setUiText(fixedUi.progressSecondary, 'PO selection is tap-only');
+      fixedUi.progressFill.style.width = '0%';
+      setUiText(fixedUi.workTitle, 'Purchase orders');
+      renderPoChoices();
+    } else {
       var po = currentPo();
       var prog = currentProgress();
       var detail = currentReceiveDetail();
-      h += '<div class="ptx7-rx-po">' + (po ? 'PO ' + esc(po) : 'Receiving') +
-        (prog ? '  \u00b7  ' + esc(prog.received) + '/' + esc(prog.total) + ' PO' : '') + '</div>';
-
-      if (detail) {
-        // Waiting for location to submit this item.
-        var locs = (detail.locations && detail.locations.length) ? detail.locations
-          : (detail.location ? [detail.location] : []);
-        h += '<div class="ptx7-rx-step">SCAN LOCATION</div>';
-        // Per-item pending progress (scanned, not yet submitted).
-        h += itemProgressCard(detail, 'pending');
-        if (locs.length === 0) {
-          h += '<div class="ptx7-rx-loccard" style="background:#b42318">' +
-            '<div class="short" style="font-size:34px">Locations unavailable</div>' +
-            '<div class="full">View PIMS to continue</div>' +
-            '<div class="meds">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
-        } else if (locs.length === 1) {
-          h += '<div class="ptx7-rx-loccard">' +
-            '<div class="cue">SCAN THIS LOCATION</div>' +
-            '<div class="short">' + esc(shortLoc(locs[0])) + '</div>' +
-            '<div class="full">' + esc(locs[0]) + '</div>' +
-            '<div class="meds">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
-        } else {
-          h += '<div class="ptx7-rx-sub" style="font-weight:900;color:#172b3a">' +
-            esc(detail.drug || ('NDC ' + detail.ndc)) + '</div>';
-          h += '<div class="ptx7-rx-sub">Multiple locations available \u2014 scan any one</div>';
-          locs.forEach(function (L, i) {
-            h += '<div class="ptx7-rx-loccard" style="padding:16px" data-loc="' + i + '">' +
-              '<div class="short" style="font-size:46px">' + esc(shortLoc(L)) + '</div>' +
-              '<div class="full">' + esc(L) + '</div></div>';
-          });
+      setUiText(fixedUi.headerPo, po ? 'PO ' + po + (prog ? '   •   ' + prog.received + '/' + prog.total : '') : 'Receiving');
+      fixedUi.submit.disabled = true;
+      fixedUi.submit.textContent = 'SUBMIT RECEIVES';
+      if (state.submitProcessing) {
+        state.uiState = 'SUBMITTING';
+        setUiStatus('Submitting through PIMS. Wait for its location prompt or validation result.', 'processing');
+        setUiText(fixedUi.instruction, 'Submitting');
+        setProgress(detail || (state.pendingConfirmation && state.pendingConfirmation.medication), true);
+        setUiText(fixedUi.workTitle, 'Waiting for PIMS');
+        setWorkContent('submitting', function(container){ appendScanCue(container, 'PLEASE WAIT'); });
+        fixedUi.submit.textContent = 'SUBMITTING…';
+      } else if (detail && detail.stage === 'QUEUED') {
+        state.uiState = 'QUEUED';
+        var submitButton = pimsSubmitButton();
+        var canSubmit = !!submitButton && !submitButton.disabled && submitButton.getAttribute('aria-disabled') !== 'true';
+        setUiStatus(state.pimsValidationError || state.queuedItemError || state.submitError ||
+          (canSubmit ? 'Medication scanned. Review pending quantities, then submit through PIMS.' :
+            'PIMS Submit Receives is unavailable. Use View PIMS.'),
+          state.pimsValidationError || state.queuedItemError || state.submitError || !canSubmit ? 'error' : 'ok');
+        setUiText(fixedUi.instruction, 'Review medication');
+        setProgress(detail, true);
+        setUiText(fixedUi.workTitle, 'Pending receive');
+        setWorkContent('queued|' + receiveTraceSignature(detail), function(container){
+          var message = document.createElement('div'); message.className = 'ptx7-rx-confirm ok';
+          message.textContent = 'Press Submit Receives once. PIMS remains responsible for validation and posting.';
+          container.appendChild(message);
+        });
+        fixedUi.submit.disabled = !canSubmit || !!state.queuedItemError;
+      } else if (detail && detail.stage === 'LOCATION') {
+        state.uiState = 'PENDING_LOCATION';
+        setUiStatus(state.pimsValidationError || (detail.locations && detail.locations.length ?
+          'Scan location to complete receive. PIMS has not confirmed receipt yet.' :
+          'PIMS requires a location, but no suggested location is available. View PIMS.'),
+          state.pimsValidationError || !(detail.locations && detail.locations.length) ? 'error' : 'ok');
+        setUiText(fixedUi.instruction, 'Scan location');
+        setProgress(detail, true);
+        setUiText(fixedUi.workTitle, detail.locations && detail.locations.length > 1 ? 'Valid locations' : 'Location');
+        renderLocations(detail);
+        state._locs = detail.locations || [];
+        if (state.pendingConfirmation) {
+          state.pendingConfirmation.waitingForLocation = true;
+          state.pendingConfirmation.medication = detail;
         }
-        if (detail.warnings && detail.warnings.length) {
-          h += '<div class="ptx7-rx-warn">\u26A0 ' + esc(detail.warnings.join(' \u00b7 ')) + '</div>';
-        }
-        h += scanBox('SCAN LOCATION');
-        h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-repeat">\uD83D\uDD0A REPEAT LOCATION</button>';
-        state._locs = locs;
+        fixedUi.submit.textContent = 'SCAN LOCATION TO COMPLETE';
+      } else if (state.pendingConfirmation && state.pendingConfirmation.waitingForLocation) {
+        state.uiState = state.submitError ? 'ERROR' : 'WAITING_CONFIRMATION';
+        setUiStatus(state.pimsValidationError || state.submitError || 'Location submitted. Waiting for PIMS to increase confirmed quantity.',
+          state.pimsValidationError || state.submitError ? 'error' : 'processing');
+        setUiText(fixedUi.instruction, state.submitError ? 'Check PIMS' : 'Confirming receive');
+        setProgress(state.pendingConfirmation.medication, true);
+        setUiText(fixedUi.workTitle, state.submitError ? 'PIMS confirmation unavailable' : 'Waiting for PIMS');
+        setWorkContent('confirmation|' + (state.submitError || 'waiting'), function(container){
+          var message = document.createElement('div'); message.className = state.submitError ? 'ptx7-rx-confirm bad' : 'ptx7-rx-confirm ok';
+          message.textContent = state.submitError || 'Do not scan the next medication until PIMS confirms this receive.';
+          container.appendChild(message);
+        });
       } else if (state.resolvingItem) {
-        // A scan was just delivered; PIMS hasn't shown the item yet.
-        h += '<div class="ptx7-rx-step">SCAN ITEM</div>';
-        h += '<div class="ptx7-rx-card"><div class="count" style="color:#172b3a">Reading item\u2026</div>' +
-          '<div class="bottles">Waiting for PIMS to confirm the scan</div></div>';
-        h += scanBox('READING\u2026');
+        state.uiState = 'PROCESSING';
+        setUiStatus('Checking item with PIMS. Do not scan again yet.', 'processing');
+        setUiText(fixedUi.instruction, 'Checking item');
+        setUiText(fixedUi.medName, 'Reading current medication…');
+        setUiText(fixedUi.medDetail, 'Waiting for PIMS acceptance');
+        setUiText(fixedUi.progressPrimary, 'Processing');
+        setUiText(fixedUi.progressSecondary, 'A captured scan is not yet a confirmed receive');
+        fixedUi.progressFill.style.width = '0%';
+        setUiText(fixedUi.workTitle, 'Please wait');
+        setWorkContent('processing', function(container){ appendScanCue(container, 'CHECKING…'); });
+      } else if (Date.now() < state.confirmedUntil) {
+        state.uiState = 'CONFIRMED';
+        setUiStatus('PIMS confirmed the receive.', 'ok');
+        setUiText(fixedUi.instruction, 'Received');
+        setProgress(state.lastMed, false);
+        setUiText(fixedUi.workTitle, 'Ready for next medication');
+        setWorkContent('confirmed|' + (state.lastMed ? state.lastMed.key : ''), function(container){ appendScanCue(container, 'NEXT ITEM'); });
       } else {
-        // Ready for next item: medication progress card.
-        h += '<div class="ptx7-rx-step">SCAN ITEM</div>';
-        h += medCard(prog);
-        h += scanBox('SCAN ITEM');
+        state.uiState = 'READY';
+        var pimsTimedOut = lastScanInfo.pimsResult === 'no-receive-dialog-change-within-2500ms';
+        setUiStatus(pimsTimedOut ?
+          'PIMS did not confirm the last scan. Do not rescan until you review PIMS or diagnostics.' :
+          'Ready. PIMS will confirm each medication and location.', pimsTimedOut ? 'error' : 'ok');
+        setUiText(fixedUi.instruction, pimsTimedOut ? 'Check PIMS' : 'Scan medication');
+        setProgress(null, false);
+        setUiText(fixedUi.workTitle, 'Item barcode');
+        setWorkContent('receive-ready', function(container){ appendScanCue(container, 'SCAN ITEM'); });
       }
     }
 
-    if (showExit) {
-      h += '<button class="ptx7-rx-btn ghost" type="button" id="ptx7-rx-exit">VIEW PIMS</button>';
-    }
-
-    body.innerHTML = h;
-
-    // Wiring
-    var home = document.getElementById('ptx7-rx-home-tile');
-    if (home) home.onclick = function () { startNdcPhase(); };
-    var exit = document.getElementById('ptx7-rx-exit');
-    if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
-    var rescan = document.getElementById('ptx7-rx-rescan');
-    if (rescan) rescan.onclick = function () { startNdcPhase(); };
-    var repeat = document.getElementById('ptx7-rx-repeat');
-    if (repeat) repeat.onclick = function () {
-      var d = currentReceiveDetail();
-      if (d && d.location) speakLocation(d.location, true);
-    };
-    [].slice.call(body.querySelectorAll('[data-po]')).forEach(function (btn) {
-      btn.onclick = function () {
-        var p = state.pos[Number(btn.getAttribute('data-po'))];
-        if (p) choosePo(p);
-      };
-    });
-    [].slice.call(body.querySelectorAll('[data-loc]')).forEach(function (card) {
-      card.onclick = function () {
-        var L = (state._locs || [])[Number(card.getAttribute('data-loc'))];
-        if (L) speakLocation(L, true);
-      };
-    });
-
-    // Report scan ownership to the native host (unchanged logic).
     try {
-      if (window.PTX7Host && window.PTX7Host.setScanOwnership) {
-        window.PTX7Host.setScanOwnership(assistantOwnsScan());
-      }
+      if (window.PTX7Host && window.PTX7Host.setScanOwnership) window.PTX7Host.setScanOwnership(assistantOwnsScan());
     } catch (e) {}
-
-    if (root.style.display === 'block' && assistantOwnsScan()) {
-      // Always use the capture delegate. Directly focusing the WebView input
-      // bypassed the native Android capture field, leaked the first HID key to
-      // PIMS, and opened the soft keyboard.
-      setTimeout(focusCapture, 20);
-    } else {
-      releaseFocusToPims();
-    }
+    if (root.style.display === 'block' && assistantOwnsScan()) setTimeout(focusCapture, 20);
+    else releaseFocusToPims();
   }
+
+  document.getElementById('ptx7-rx-home-start').onclick = startNdcPhase;
+  document.getElementById('ptx7-rx-view-pims').onclick = function(){ window.__ptx7Rx.close(); };
+  fixedUi.submit.onclick = submitReceivesThroughPims;
 
   // Build the medication progress card from PIMS quantities (no hard-coding).
 
@@ -1054,6 +1416,22 @@
       detail.received ? detail.received.pkgs + '/' + detail.received.units : ''].join('|');
   }
 
+  function markPimsReceiveConfirmed(progress) {
+    var pending = state.pendingConfirmation;
+    if (!pending) return;
+    state.lastMed = pending.medication || state.lastMed;
+    state.pendingConfirmation = null;
+    state.submitProcessing = false;
+    state.submitError = '';
+    state.confirmedUntil = Date.now() + 1500;
+    clearTimeout(state.submitTimer);
+    clearTimeout(state.confirmedTimer);
+    state.confirmedTimer = setTimeout(render, 1550);
+    lastScanInfo.pimsResult = 'confirmed-by-pims-progress';
+    lastScanInfo.pimsDetailSignature = 'PO received=' + (progress ? progress.received : '?');
+    tone(true);
+  }
+
   // Continuously mirror PIMS. A page-driven watchdog keeps the phase correct:
   // once PIMS is on a PO receiving page, we must be in RECEIVE (so item scans
   // are released to PIMS, not treated as a new NDC lookup). This handles both
@@ -1076,6 +1454,33 @@
       if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
       var prog = currentProgress();
+      var poReceived = progressReceivedNumber(prog);
+      var validationError = pimsValidationError();
+      if (validationError) {
+        state.pimsValidationError = validationError;
+        state.submitProcessing = false;
+        clearTimeout(state.submitTimer);
+      }
+      if (state.submitProcessing && detail && detail.stage === 'LOCATION') {
+        state.submitProcessing = false;
+        clearTimeout(state.submitTimer);
+        if (state.pendingConfirmation) {
+          state.pendingConfirmation.waitingForLocation = true;
+          state.pendingConfirmation.medication = detail;
+          state.pendingConfirmation.baselinePoReceived = state.pendingConfirmation.baselinePoReceived == null ?
+            poReceived : state.pendingConfirmation.baselinePoReceived;
+        }
+      }
+      if (state.pendingConfirmation && state.pendingConfirmation.waitingForLocation &&
+          (!detail || detail.stage !== 'LOCATION')) {
+        var baseline = state.pendingConfirmation.baselinePoReceived;
+        if (baseline != null && poReceived != null && poReceived > baseline) {
+          markPimsReceiveConfirmed(prog);
+        } else if (Date.now() - state.pendingConfirmation.startedAt > 8000) {
+          state.submitError = 'PIMS has not exposed a confirmed quantity increase. Review PIMS; pending data was preserved.';
+          state.submitProcessing = false;
+        }
+      }
       if (lastScanInfo.forwardedAt && lastScanInfo.pimsResult === 'awaiting-pims') {
         var responseChanged = detail && (!lastScanInfo.preForwardHadDetail ||
           receiveTraceSignature(detail) !== lastScanInfo.preForwardDetailSignature);
@@ -1105,15 +1510,18 @@
         if (prev) {
           var wasPending = /@/.test(prev.split('|')[2] || '');
           var nowPending = !!detail;
-          if (!wasPending && nowPending) tone(true);       // item accepted -> location
-          else if (wasPending && !nowPending) tone(true);  // location submitted -> confirmed
+          if (!wasPending && nowPending) tone(true); // PIMS exposed a current item/location state
+          // Dialog disappearance alone is never confirmation. The independent
+          // quantity check above controls the Confirmed state.
         }
         // Announce location ONCE per change (multi vs single).
         var locKey = detail ? (detail.locations || []).join(',') : '';
         if (locKey && locKey !== state.lastSpokenLoc) {
           state.lastSpokenLoc = locKey;
           var locs = detail.locations || [];
-          if (locs.length > 1) { speakPhrase('Multiple locations available', false); }
+          if (locs.length > 1) {
+            speakPhrase('Multiple valid locations. ' + locs.map(spokenLocation).join('. '), false);
+          }
           else if (locs.length === 1) { speakLocation(locs[0], false); }
         }
         if (!detail) state.lastSpokenLoc = '';
@@ -1361,7 +1769,7 @@
   // then done via document keypress events with no editable target. During PO
   // selection the assistant does not own the scan (tap-only).
   function assistantOwnsScan() {
-    if (state.releaseFocus) return false;        // diagnostic override
+    if (state.releaseFocus || state.settingsOpen) return false; // user controls/diagnostic override
     // Arm capture on HOME before the operator taps Receiving. This prevents the
     // first Bluetooth HID character from leaking during the HOME -> NDC bridge
     // transition. PO selection remains tap-only; RECEIVE is scanner-owned.
@@ -1440,38 +1848,61 @@
 
   // Minimal Settings dialog: voice on/off, rate, preview, and diagnostic.
   // (Full voice list + RS6100 pairing are a later layer — see summary.)
+  function populateSettingsVoices() {
+    var select = document.getElementById('ptx7-rx-set-voice-name');
+    var voices = availableVoices();
+    var saved = ''; try { saved = localStorage.getItem(VOICE_NAME_KEY) || ''; } catch (e) {}
+    select.replaceChildren();
+    var automatic = document.createElement('option'); automatic.value = ''; automatic.textContent = 'Automatic device voice'; select.appendChild(automatic);
+    voices.forEach(function(voice) {
+      var option = document.createElement('option'); option.value = voice.voiceURI || voice.name;
+      option.textContent = voice.name + ' (' + voice.lang + ')'; select.appendChild(option);
+    });
+    select.value = [].slice.call(select.options).some(function(option){return option.value === saved;}) ? saved : '';
+  }
+
   function openSettings() {
-    var on = voiceEnabled();
-    var rate = voiceRate();
-    body.innerHTML =
-      '<div class="ptx7-rx-step">SETTINGS</div>' +
-      '<div class="ptx7-rx-card">' +
-      '<div class="name" style="font-size:22px">Location voice</div>' +
-      '<button class="ptx7-rx-btn ' + (on ? 'primary' : 'ghost') + '" id="ptx7-set-voice">VOICE: ' + (on ? 'ON' : 'OFF') + '</button>' +
-      '<button class="ptx7-rx-btn ghost" id="ptx7-set-rate">SPEED: ' + rate.toFixed(2) + '\u00d7</button>' +
-      '<button class="ptx7-rx-btn ghost" id="ptx7-set-preview">\uD83D\uDD0A PREVIEW</button>' +
-      '</div>' +
-      '<div class="ptx7-rx-card"><div class="name" style="font-size:22px">Diagnostics</div>' +
-      '<button class="ptx7-rx-btn ghost" id="ptx7-set-diag">SHOW DIAGNOSTIC</button>' +
-      '<div id="ptx7-rx-diagbox"></div></div>' +
-      '<button class="ptx7-rx-btn ghost" id="ptx7-set-back">DONE</button>';
-    document.getElementById('ptx7-set-voice').onclick = function () {
-      try { localStorage.setItem(VOICE_ON_KEY, voiceEnabled() ? 'false' : 'true'); } catch (e) {}
-      openSettings();
-    };
-    document.getElementById('ptx7-set-rate').onclick = function () {
-      var rates = [0.85, 1, 1.15, 1.3]; var i = rates.indexOf(voiceRate());
-      var next = rates[(i + 1) % rates.length];
-      try { localStorage.setItem(VOICE_RATE_KEY, String(next)); } catch (e) {}
-      openSettings();
-    };
-    document.getElementById('ptx7-set-preview').onclick = function () { speakLocation('MANFW0103-J-04', true); };
-    document.getElementById('ptx7-set-diag').onclick = function () {
-      var b = document.getElementById('ptx7-rx-diagbox');
-      if (b) b.innerHTML = '<textarea readonly style="width:100%;height:240px;font:12px monospace;' +
-        'border:2px solid #cdd5db;border-radius:10px;padding:8px">' + esc(buildDiagnostic()) + '</textarea>';
-    };
-    document.getElementById('ptx7-set-back').onclick = function () { render(); };
+    state.settingsOpen = true;
+    try { if (window.PTX7Host && window.PTX7Host.setScanOwnership) window.PTX7Host.setScanOwnership(false); } catch (e) {}
+    releaseFocusToPims();
+    document.getElementById('ptx7-rx-set-voice-on').value = voiceEnabled() ? 'on' : 'off';
+    document.getElementById('ptx7-rx-set-voice-rate').value = String(voiceRate());
+    document.getElementById('ptx7-rx-set-voice-volume').value = String(voiceVolume());
+    populateSettingsVoices();
+    fixedUi.settings.classList.add('open');
+    document.getElementById('ptx7-rx-settings-diag').style.display = 'none';
+  }
+
+  document.getElementById('ptx7-rx-set-voice-on').onchange = function(event) {
+    try { localStorage.setItem(VOICE_ON_KEY, event.target.value === 'on' ? 'true' : 'false'); } catch (e) {}
+    if (event.target.value === 'off' && window.speechSynthesis) window.speechSynthesis.cancel();
+  };
+  document.getElementById('ptx7-rx-set-voice-name').onchange = function(event) {
+    try { localStorage.setItem(VOICE_NAME_KEY, event.target.value); } catch (e) {}
+  };
+  document.getElementById('ptx7-rx-set-voice-rate').onchange = function(event) {
+    try { localStorage.setItem(VOICE_RATE_KEY, event.target.value); } catch (e) {}
+  };
+  document.getElementById('ptx7-rx-set-voice-volume').onchange = function(event) {
+    try { localStorage.setItem(VOICE_VOLUME_KEY, event.target.value); } catch (e) {}
+  };
+  document.getElementById('ptx7-rx-set-preview').onclick = function() {
+    speakLocation((state._locs && state._locs[0]) || 'MANFW0103-J-04', true);
+  };
+  document.getElementById('ptx7-rx-set-diag').onclick = function() {
+    var box = document.getElementById('ptx7-rx-settings-diag');
+    box.value = buildDiagnostic(); box.style.display = 'block';
+  };
+  document.getElementById('ptx7-rx-settings-done').onclick = function() {
+    state.settingsOpen = false;
+    fixedUi.settings.classList.remove('open');
+    render();
+    setTimeout(focusCapture, 20);
+  };
+  if (window.speechSynthesis && window.speechSynthesis.addEventListener) {
+    window.speechSynthesis.addEventListener('voiceschanged', function() {
+      if (fixedUi.settings.classList.contains('open')) populateSettingsVoices();
+    });
   }
 
   // ---------------------------------------------------------------------------
