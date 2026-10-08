@@ -919,9 +919,10 @@
     } catch (e) {}
 
     if (root.style.display === 'block' && assistantOwnsScan()) {
-      setTimeout(function () {
-        try { capture.focus({ preventScroll: true }); } catch (e) { try { capture.focus(); } catch (e2) {} }
-      }, 20);
+      // Always use the capture delegate. Directly focusing the WebView input
+      // bypassed the native Android capture field, leaked the first HID key to
+      // PIMS, and opened the soft keyboard.
+      setTimeout(focusCapture, 20);
     } else {
       releaseFocusToPims();
     }
