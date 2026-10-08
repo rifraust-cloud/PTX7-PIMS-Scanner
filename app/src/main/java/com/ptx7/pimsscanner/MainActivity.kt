@@ -2921,10 +2921,11 @@ class MainActivity : ComponentActivity() {
             // PO/RECEIVE=false) so native key interception matches.
             @android.webkit.JavascriptInterface
             fun setScanOwnership(owns: Boolean) {
-                runOnUiThread {
-                    assistantOwnsScanNative = owns
-                    updateHardwareScanFocus()
-                }
+                // Set the volatile owner immediately on the JavaScript bridge
+                // thread. Posting both ownership and focus to the UI thread let
+                // the first HID key leak into PIMS before capture was armed.
+                assistantOwnsScanNative = owns
+                runOnUiThread { updateHardwareScanFocus() }
             }
             @android.webkit.JavascriptInterface
             fun usesNativeCapture(): Boolean = true
