@@ -188,6 +188,19 @@
   // ---- PO receiving-page readers -------------------------------------------
   // These read the live PIMS "Receiving" page so the overlay can mirror it.
 
+  // True when PIMS is showing a PO receiving page (not the Inventory lookup).
+  // Markers seen on that page: "Receiving in progress", the Unreceived/Received
+  // tabs, "Search by Product Id", "Manually Receive Item", or a PO + Status.
+  function onReceivingPage() {
+    var t = pageText();
+    if (/Receiving in progress/i.test(t)) return true;
+    if (/Manually Receive Item/i.test(t)) return true;
+    if (/Unreceived\s*\d+\s*\/\s*\d+/i.test(t)) return true;
+    if (/Back to all Purchase Orders/i.test(t)) return true;
+    if (/Scan Location to submit receives/i.test(t)) return true;
+    return false;
+  }
+
   // The PO number heading (e.g. "3XX63W4G") and status line.
   function currentPo() {
     var t = pageText();
@@ -644,12 +657,25 @@
     setTimeout(render, 1200);
   }
 
-  // Continuously mirror PIMS during the RECEIVE phase so the big UI tracks the
-  // live page (drug scanned, location submitted) without leaving Receive Mode.
+  // Continuously mirror PIMS. A page-driven watchdog keeps the phase correct:
+  // once PIMS is on a PO receiving page, we must be in RECEIVE (so item scans
+  // are released to PIMS, not treated as a new NDC lookup). This handles both
+  // SPA navigation and full reloads regardless of the resume flag/timing.
   function startMirror() {
     clearInterval(state.mirrorTimer);
     state.mirrorTimer = setInterval(function () {
       if (root.style.display !== 'block') return;
+
+      // Watchdog: sync phase to the page.
+      if (onReceivingPage()) {
+        if (state.phase !== 'RECEIVE') {
+          state.phase = 'RECEIVE';
+          state.lastSignature = '';
+          try { sessionStorage.removeItem('ptx7_rx_resume'); } catch (e) {}
+          render();   // render() also releases scan ownership to PIMS
+        }
+      }
+
       if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
       var prog = currentProgress();
@@ -853,7 +879,13 @@
     open: function () {
       window.__ptx7RxReopen = false;
       root.style.display = 'block';
-      state.phase = 'NDC'; state.ndc = ''; state.drug = ''; state.pos = [];
+      // If PIMS is already on a PO receiving page, open straight into RECEIVE
+      // so a tap on RECEIVE while inside a PO doesn't force a new NDC lookup.
+      if (onReceivingPage()) {
+        state.phase = 'RECEIVE';
+      } else {
+        state.phase = 'NDC'; state.ndc = ''; state.drug = ''; state.pos = [];
+      }
       state.lastSignature = '';
       capture.value = '';
       try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
@@ -899,17 +931,28 @@
     }
   };
 
-  // Auto-resume: if we just chose a PO and PIMS navigated to its receiving
-  // page (fresh document), reopen Receive Mode straight into the RECEIVE phase
-  // so the operator never drops back to raw PIMS. The flag expires quickly.
+  // Auto-resume: after choosing a PO, PIMS navigates to the receiving page and
+  // this script re-injects on the fresh document. Resume into RECEIVE once the
+  // receiving page is actually ready (poll, don't guess with a fixed delay).
   try {
     var resumeRaw = sessionStorage.getItem('ptx7_rx_resume');
     if (resumeRaw) {
       var resume = JSON.parse(resumeRaw);
-      sessionStorage.removeItem('ptx7_rx_resume');
-      if (resume && (Date.now() - Number(resume.at || 0) < 30000)) {
-        // Give the PO page a moment to render, then resume.
-        setTimeout(function () { window.__ptx7Rx.openInReceive(); }, 600);
+      if (resume && (Date.now() - Number(resume.at || 0) < 60000)) {
+        var tries = 0;
+        var resumeTimer = setInterval(function () {
+          tries++;
+          if (onReceivingPage()) {
+            clearInterval(resumeTimer);
+            try { sessionStorage.removeItem('ptx7_rx_resume'); } catch (e) {}
+            window.__ptx7Rx.openInReceive();
+          } else if (tries > 40) { // ~20s: give up waiting; keep flag cleared
+            clearInterval(resumeTimer);
+            try { sessionStorage.removeItem('ptx7_rx_resume'); } catch (e) {}
+          }
+        }, 500);
+      } else {
+        try { sessionStorage.removeItem('ptx7_rx_resume'); } catch (e) {}
       }
     }
   } catch (e) {}
