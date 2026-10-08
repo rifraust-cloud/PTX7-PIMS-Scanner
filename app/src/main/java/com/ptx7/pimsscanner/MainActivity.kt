@@ -2780,7 +2780,7 @@ class MainActivity : ComponentActivity() {
             layoutParams = ViewGroup.LayoutParams(1, 1)
             alpha = 0.01f
             isSingleLine = true
-            cursorVisible = false
+            isCursorVisible = false
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setTextColor(android.graphics.Color.TRANSPARENT)
             inputType = InputType.TYPE_CLASS_TEXT or
