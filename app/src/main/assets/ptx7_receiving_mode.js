@@ -229,33 +229,51 @@
     return m ? { received: m[1], total: m[2] } : null;
   }
 
-  // When a drug has been scanned on the receiving page, PIMS shows a detail
-  // panel that says "Scan Location to submit receives" with the drug, NDC, and
-  // Suggested Locations. Returns that info, or null when no drug is pending.
-  function currentReceiveDetail() {
-    var t = pageText();
-    // Detect the "waiting for location" state via either the panel header or
-    // the modal prompt PIMS shows after a drug scan.
-    if (!/Scan Location to submit receives/i.test(t) &&
-        !/Complete receive before proceeding to next NDC/i.test(t)) return null;
-    var ndc = (t.match(/NDC:\s*(\d{9,14})/i) || [])[1] || '';
-    // Prefer a real location-code match (MANFW0102-D-11 / CLDxxxx-x-xx), which
-    // is unambiguous; fall back to the labeled "Suggested Locations:" text.
-    var loc = (t.match(/\b((?:MAN(?:FW|WS)?|CLD)[A-Z]*\d{3,5}-[A-Z]-\d{1,2})\b/i) || [])[1] || '';
-    if (!loc) {
-      loc = (t.match(/Suggested Locations?:\s*([A-Z0-9\-\/ ]+)/i) || [])[1] || '';
-      loc = loc.trim().split(/\s{2,}/)[0].trim();
+  // Find the active receiving dialog/panel element (scoped), excluding our
+  // overlay. This is the authoritative source for the pending item.
+  function activeReceivePanel() {
+    var marker = /Scan Location to submit receives|Complete receive before proceeding to next NDC/i;
+    // Prefer a role=dialog/alertdialog that contains the marker text.
+    var dialogs = [].slice.call(document.querySelectorAll('[role="dialog"],[role="alertdialog"]'))
+      .filter(function (d) { return !(d.closest && d.closest('#ptx7-rx-root')); });
+    for (var i = 0; i < dialogs.length; i++) {
+      if (marker.test(dialogs[i].textContent || '')) return dialogs[i];
     }
-    loc = loc.toUpperCase();
-    // Drug heading: the detail panel repeats the drug name near the NDC.
-    var drug = '';
-    var dm = t.match(/([A-Z][A-Za-z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))\s*NDC:/i);
-    if (dm) drug = dm[1].trim();
+    // Fallback: the smallest element whose own text contains the marker.
+    var all = [].slice.call(document.querySelectorAll('section,aside,div'))
+      .filter(function (el) {
+        return !(el.closest && el.closest('#ptx7-rx-root')) && marker.test(el.textContent || '');
+      })
+      .sort(function (a, b) { return (a.textContent || '').length - (b.textContent || '').length; });
+    return all[0] || null;
+  }
 
-    // Quantities from the PIMS detail panel. PIMS shows e.g.
-    //   Quantity Ordered: 15 (1500)   -> 15 packages, 1500 units
-    //   Quantity Received: 1 (100)     -> 1 package received, 100 units
-    // Parse "<pkgs> (<units>)" pairs; do NOT hard-code package size.
+  function allLocationsIn(text) {
+    var set = {};
+    (String(text || '').toUpperCase().match(/\b(?:MAN(?:FW|WS)?|CLD[A-Z]*)\d{3,5}-[A-Z]-\d{1,2}\b/g) || [])
+      .forEach(function (l) { set[l] = true; });
+    return Object.keys(set);
+  }
+
+  // Read the active receiving panel and bind ONE pending item together.
+  // Returns null when no pending item is resolvable (caller shows "Reading…").
+  function currentReceiveDetail() {
+    var panel = activeReceivePanel();
+    if (!panel) return null;
+    var t = (panel.innerText || panel.textContent || '').replace(/\u00a0/g, ' ');
+
+    // Product id / NDC from the scoped panel only.
+    var ndc = (t.match(/NDC:?\s*-?\s*(\d{9,14})/i) || [])[1] ||
+              (t.match(/\b(\d{11})\b/) || [])[1] || '';
+
+    // Drug name: a line containing a package descriptor, within the panel.
+    var drug = '';
+    var dm = t.match(/([A-Z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))/i);
+    if (dm) drug = dm[1].replace(/\s+/g, ' ').trim();
+
+    // ALL suggested locations present in the panel (not just the first).
+    var locations = allLocationsIn(t);
+
     function pairAfter(label) {
       var re = new RegExp(label + '\\s*:?\\s*(\\d+)\\s*\\((\\d+)\\)', 'i');
       var m = t.match(re);
@@ -264,26 +282,31 @@
     var ordered = pairAfter('Quantity Ordered');
     var received = pairAfter('Quantity Received');
     var scanned = pairAfter('Currently Scanned');
-    // Package size (units per package) inferred from any pair, else from
-    // "(bottle, 100.0 Capsules)" style text.
     var pkgSize = 0;
     [received, scanned, ordered].forEach(function (p) {
       if (!pkgSize && p && p.pkgs > 0) pkgSize = Math.round(p.units / p.pkgs);
     });
     if (!pkgSize) {
-      var ps = t.match(/\(?(?:bottle|box|container|tube|each)[^)]*?(\d+(?:\.\d+)?)\s*(capsule|tablet|ml|gram|each|unit)/i);
+      var ps = t.match(/\(?(?:bottle|box|container|tube|each)[^)]*?(\d+(?:\.\d+)?)\s*(capsule|tablet|ml|gram|each|unit|inhaler)/i);
       if (ps) pkgSize = Math.round(Number(ps[1]));
     }
-    var unitWord = (t.match(/\d+\.?\d*\s*(Capsules?|Tablets?|mL|Grams?|Each|Units?)/i) || [])[1] || 'units';
+    var unitWord = (t.match(/\d+\.?\d*\s*(Capsules?|Tablets?|mL|Grams?|Each|Units?|Inhalers?)/i) || [])[1] || 'units';
 
     var warnings = [];
-    if (/hazardous drug|special handling|N\s*Listed Hazard/i.test(t)) warnings.push('HAZARDOUS — Special Handling');
+    if (/hazardous drug|special handling|N\s*Listed Hazard/i.test(t)) warnings.push('HAZARDOUS \u2014 Special Handling');
     if (/cold chain|refrigerat/i.test(t)) warnings.push('COLD CHAIN');
 
+    // If we can't resolve the essential identity, return null so the UI shows
+    // "Reading item…" rather than a stale medication.
+    if (!ndc && !drug) return null;
+
     return {
-      ndc: ndc, drug: drug, location: loc,
+      ndc: ndc, drug: drug,
+      location: locations[0] || '',   // primary (back-compat)
+      locations: locations,           // ALL suggested locations
       ordered: ordered, received: received, scanned: scanned,
-      pkgSize: pkgSize, unitWord: unitWord.toLowerCase(), warnings: warnings
+      pkgSize: pkgSize, unitWord: unitWord.toLowerCase(), warnings: warnings,
+      key: (ndc || '') + '|' + (drug || '')
     };
   }
 
@@ -595,6 +618,17 @@
       window.speechSynthesis.speak(u);
     } catch (e) {}
   }
+  function speakPhrase(text, force) {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      if (!force && !voiceEnabled()) return;
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(String(text || ''));
+      u.rate = voiceRate();
+      var v = selectedVoice(); if (v) u.voice = v;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
 
   // Hide the step-dots row; this flow is a continuous scan loop, not 4 steps.
   dots.style.display = 'none';
@@ -657,19 +691,42 @@
 
       if (detail) {
         // Waiting for location to submit this item.
+        var locs = (detail.locations && detail.locations.length) ? detail.locations
+          : (detail.location ? [detail.location] : []);
         h += '<div class="ptx7-rx-step">SCAN LOCATION</div>';
-        var full = detail.location || '';
-        h += '<div class="ptx7-rx-loccard">' +
-          '<div class="cue">SCAN THIS LOCATION</div>' +
-          '<div class="short">' + esc(full ? shortLoc(full) : 'SEE PIMS') + '</div>' +
-          (full ? '<div class="full">' + esc(full) + '</div>' : '') +
-          '<div class="meds">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div>' +
-          '</div>';
+        if (locs.length === 0) {
+          h += '<div class="ptx7-rx-loccard" style="background:#b42318">' +
+            '<div class="short" style="font-size:34px">Locations unavailable</div>' +
+            '<div class="full">View PIMS to continue</div>' +
+            '<div class="meds">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
+        } else if (locs.length === 1) {
+          h += '<div class="ptx7-rx-loccard">' +
+            '<div class="cue">SCAN THIS LOCATION</div>' +
+            '<div class="short">' + esc(shortLoc(locs[0])) + '</div>' +
+            '<div class="full">' + esc(locs[0]) + '</div>' +
+            '<div class="meds">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
+        } else {
+          h += '<div class="ptx7-rx-sub" style="font-weight:900;color:#172b3a">' +
+            esc(detail.drug || ('NDC ' + detail.ndc)) + '</div>';
+          h += '<div class="ptx7-rx-sub">Multiple locations available \u2014 scan any one</div>';
+          locs.forEach(function (L, i) {
+            h += '<div class="ptx7-rx-loccard" style="padding:16px" data-loc="' + i + '">' +
+              '<div class="short" style="font-size:46px">' + esc(shortLoc(L)) + '</div>' +
+              '<div class="full">' + esc(L) + '</div></div>';
+          });
+        }
         if (detail.warnings && detail.warnings.length) {
           h += '<div class="ptx7-rx-warn">\u26A0 ' + esc(detail.warnings.join(' \u00b7 ')) + '</div>';
         }
         h += scanBox('SCAN LOCATION');
         h += '<button class="ptx7-rx-btn wait" type="button" id="ptx7-rx-repeat">\uD83D\uDD0A REPEAT LOCATION</button>';
+        state._locs = locs;
+      } else if (state.resolvingItem) {
+        // A scan was just delivered; PIMS hasn't shown the item yet.
+        h += '<div class="ptx7-rx-step">SCAN ITEM</div>';
+        h += '<div class="ptx7-rx-card"><div class="count" style="color:#172b3a">Reading item\u2026</div>' +
+          '<div class="bottles">Waiting for PIMS to confirm the scan</div></div>';
+        h += scanBox('READING\u2026');
       } else {
         // Ready for next item: medication progress card.
         h += '<div class="ptx7-rx-step">SCAN ITEM</div>';
@@ -702,6 +759,12 @@
         if (p) choosePo(p);
       };
     });
+    [].slice.call(body.querySelectorAll('[data-loc]')).forEach(function (card) {
+      card.onclick = function () {
+        var L = (state._locs || [])[Number(card.getAttribute('data-loc'))];
+        if (L) speakLocation(L, true);
+      };
+    });
 
     // Report scan ownership to the native host (unchanged logic).
     try {
@@ -721,29 +784,20 @@
 
   // Build the medication progress card from PIMS quantities (no hard-coding).
   function medCard(prog) {
-    var d = currentReceiveDetail(); // may be null when idle
-    // When idle (no pending detail), use the last-known med if available.
-    var med = d || state.lastMed || null;
-    if (!med || !med.drug) {
-      // No medication context yet: show PO-level begin prompt.
-      return '<div class="ptx7-rx-card"><div class="count" style="color:#172b3a">Begin receiving</div>' +
-        '<div class="bottles">Scan an item to start</div>' +
-        (prog ? '<div class="bottles">PO progress ' + esc(prog.received) + '/' + esc(prog.total) + '</div>' : '') +
-        '</div>';
-    }
-    var rec = med.received || { pkgs: 0, units: 0 };
-    var ord = med.ordered || { pkgs: 0, units: 0 };
-    var unit = med.unitWord || 'units';
-    var frac = ord.units ? (rec.units / ord.units) : 0.02;
+    // Idle (no pending item): never present a previous medication as current.
+    var last = state.lastMed;
     var html = '<div class="ptx7-rx-card">' +
-      '<div class="name">' + esc(med.drug) + '</div>' +
-      '<div class="ndc">NDC ' + esc(med.ndc) + '</div>' +
-      '<div class="count">' + rec.units + ' / ' + ord.units + ' ' + esc(unit) + ' confirmed</div>' +
-      '<div class="bottles">' + rec.pkgs + ' of ' + ord.pkgs + ' packages' +
-        (med.pkgSize ? ' \u00b7 ' + med.pkgSize + ' each' : '') + '</div>' +
-      '<div class="ptx7-rx-barwrap"><div class="ptx7-rx-bar2" style="width:' +
-        Math.max(2, Math.min(100, Math.round(frac * 100))) + '%"></div></div>';
-    html += '</div>';
+      '<div class="count" style="color:#172b3a">Ready for next item</div>' +
+      '<div class="bottles">Scan an item\u2019s 2D barcode to begin</div>' +
+      (prog ? '<div class="bottles">PO progress ' + esc(prog.received) + '/' + esc(prog.total) + '</div>' : '') +
+      '</div>';
+    if (last && last.drug && last.received) {
+      html += '<div class="ptx7-rx-card" style="border-style:dashed">' +
+        '<div class="ndc" style="font-weight:900">LAST RECEIVED</div>' +
+        '<div class="name" style="font-size:22px">' + esc(last.drug) + '</div>' +
+        '<div class="bottles">' + last.received.pkgs + ' of ' + (last.ordered ? last.ordered.pkgs : '?') +
+          ' packages confirmed</div></div>';
+    }
     return html;
   }
 
@@ -818,14 +872,19 @@
       if (state.phase !== 'RECEIVE') return; // NDC/PO phases manage their own UI
       var detail = currentReceiveDetail();
       var prog = currentProgress();
-      // Remember the current medication so the progress card persists between
-      // the pending-location state and the idle state for the same drug.
+      // Remember the current medication so the progress card can show it as
+      // "Last received" after submission (labeled, never as current).
       if (detail && detail.drug) state.lastMed = detail;
-      // Include progress + pending detail so the count never goes stale.
+      // Once PIMS reflects a pending item, we're no longer "reading".
+      if (detail) { state.resolvingItem = false; clearTimeout(state.resolveTimer); }
+      // Signature includes confirmed + pending quantities and ALL locations so
+      // repeated scans of the SAME medication (count changes) still update.
+      var qsig = detail ? ((detail.received ? detail.received.pkgs + '/' + detail.received.units : '') + '~' +
+        (detail.scanned ? detail.scanned.pkgs + '/' + detail.scanned.units : '')) : '';
       var sig = currentPo() + '|' +
         (prog ? prog.received + '/' + prog.total : '?') + '|' +
-        (detail ? (detail.ndc + '@' + detail.location + '@' +
-          (detail.received ? detail.received.units : '')) : 'idle');
+        (detail ? (detail.key + '@' + (detail.locations || []).join(',') + '@' + qsig) : 'idle') + '|' +
+        (state.resolvingItem ? 'resolving' : '');
       if (sig !== state.lastSignature) {
         var prev = state.lastSignature;
         state.lastSignature = sig;
@@ -835,10 +894,13 @@
           if (!wasPending && nowPending) tone(true);       // item accepted -> location
           else if (wasPending && !nowPending) tone(true);  // location submitted -> confirmed
         }
-        // Announce the location ONCE when a new pending location appears.
-        if (detail && detail.location && detail.location !== state.lastSpokenLoc) {
-          state.lastSpokenLoc = detail.location;
-          speakLocation(detail.location, false);
+        // Announce location ONCE per change (multi vs single).
+        var locKey = detail ? (detail.locations || []).join(',') : '';
+        if (locKey && locKey !== state.lastSpokenLoc) {
+          state.lastSpokenLoc = locKey;
+          var locs = detail.locations || [];
+          if (locs.length > 1) { speakPhrase('Multiple locations available', false); }
+          else if (locs.length === 1) { speakLocation(locs[0], false); }
         }
         if (!detail) state.lastSpokenLoc = '';
         render();
@@ -992,7 +1054,11 @@
       var method = deliverScanToPims(scanned);
       lastScanInfo.method = method;
       setDebug('deliver ' + scanned.length + 'ch via ' + method);
-      // Reflect PIMS's resulting state (item accepted -> location, or submitted).
+      // Show "Reading item…" until PIMS reflects the new item or location.
+      state.resolvingItem = true;
+      clearTimeout(state.resolveTimer);
+      state.resolveTimer = setTimeout(function () { state.resolvingItem = false; render(); }, 2500);
+      state.lastSignature = ''; // force the mirror to re-evaluate
       setTimeout(render, 300);
       setTimeout(render, 900);
       setTimeout(render, 1600);
