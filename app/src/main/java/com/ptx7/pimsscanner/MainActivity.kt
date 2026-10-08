@@ -158,6 +158,15 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor =
             android.graphics.Color.BLACK
 
+        if (NATIVE_CAPTURE_DIAGNOSTIC) {
+            setContentView(android.widget.FrameLayout(this))
+            receivingModeOpen = true
+            assistantOwnsScanNative = true
+            setupHardwareScanCapture()
+            updateHardwareScanFocus()
+            return
+        }
+
         setContentView(R.layout.activity_main)
 
         scannerCollapseButton = findViewById(R.id.scannerCollapseButton)
@@ -2838,7 +2847,7 @@ class MainActivity : ComponentActivity() {
         val value = hardwareScanCapture.text.toString()
         val readiness = "READY=${hardwareScanCapture.hasFocus() && hardwareScanCapture.hasWindowFocus()} " +
             "hasFocus=${hardwareScanCapture.hasFocus()} windowFocus=${hardwareScanCapture.hasWindowFocus()} " +
-            "currentFocus=${focusDescription()} bridge=$receivingBridgeRegistered owner=$assistantOwnsScanNative"
+            "currentFocus=${focusDescription()} bridge=${if (NATIVE_CAPTURE_DIAGNOSTIC) "not-required" else receivingBridgeRegistered} owner=$assistantOwnsScanNative"
         val captured = "CAPTURED length=${value.length} value=${escapeForTrace(value)} " +
             "codes=${value.map { it.code }.joinToString(",")}"
         hardwareCaptureStatus.text = listOf(readiness, captured, extra, diagnosticEvents.joinToString("\n"))
@@ -2904,8 +2913,8 @@ class MainActivity : ComponentActivity() {
         }
         val panelParams = android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM
+            if (NATIVE_CAPTURE_DIAGNOSTIC) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
         )
         addContentView(hardwareCapturePanel, panelParams)
         hardwareScanCapture.setOnFocusChangeListener { _, hasFocus ->
@@ -2984,7 +2993,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateHardwareScanFocus() {
-        if (!::hardwareScanCapture.isInitialized || !::webView.isInitialized) return
+        if (!::hardwareScanCapture.isInitialized) return
+        if (!NATIVE_CAPTURE_DIAGNOSTIC && !::webView.isInitialized) return
         val shouldCapture = receivingModeOpen && (NATIVE_CAPTURE_DIAGNOSTIC || assistantOwnsScanNative)
         if (shouldCapture) {
             if (NATIVE_CAPTURE_DIAGNOSTIC) setWebViewFocusableForCapture(false)
@@ -3017,7 +3027,7 @@ class MainActivity : ComponentActivity() {
             hardwareCaptureChangeCount = 0
             hardwareScanCapture.clearFocus()
             hardwareScanCapture.visibility = View.GONE
-            webView.requestFocus()
+            if (::webView.isInitialized) webView.requestFocus()
         }
     }
 
@@ -3315,13 +3325,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        registerScanReceiver()
+        if (!NATIVE_CAPTURE_DIAGNOSTIC) registerScanReceiver()
         if (receivingModeOpen) updateHardwareScanFocus()
     }
 
     override fun onPause() {
         super.onPause()
-        unregisterScanReceiver()
+        if (!NATIVE_CAPTURE_DIAGNOSTIC) unregisterScanReceiver()
     }
 
     override fun onDestroy() {
@@ -3335,11 +3345,15 @@ class MainActivity : ComponentActivity() {
 
         super.onDestroy()
 
-        barcodeScanner.close()
-        cameraExecutor.shutdown()
+        if (::barcodeScanner.isInitialized) barcodeScanner.close()
+        if (::cameraExecutor.isInitialized) cameraExecutor.shutdown()
     }
 
     override fun onBackPressed() {
+        if (NATIVE_CAPTURE_DIAGNOSTIC) {
+            finish()
+            return
+        }
         // If Receiving Mode is open, back should close it, not navigate PIMS.
         webView.evaluateJavascript(
             "(window.__ptx7Rx && window.__ptx7Rx.isOpen()) ? (window.__ptx7Rx.close(), 'closed') : 'none'"
