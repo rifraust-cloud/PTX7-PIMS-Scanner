@@ -2422,7 +2422,7 @@ class MainActivity : ComponentActivity() {
 
         } else {
             appHeader.visibility = View.VISIBLE
-            scannerCollapseButton.visibility = View.VISIBLE
+            scannerCollapseButton.visibility = View.GONE
             pimsHeader.visibility = View.VISIBLE
             zoomToolbar.visibility = View.VISIBLE
 

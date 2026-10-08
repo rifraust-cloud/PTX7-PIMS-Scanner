@@ -58,39 +58,17 @@
 
         android:layout_width="match_parent"
 
-        android:layout_height="60dp"
+        android:layout_height="0dp"
 
         android:minWidth="0dp"
 
         android:minHeight="0dp"
 
-        android:paddingStart="18dp"
+        android:padding="0dp"
 
-        android:paddingEnd="18dp"
+        android:text="PIMS MOBILE"
 
-        android:paddingTop="0dp"
-
-        android:paddingBottom="0dp"
-
-        android:gravity="center"
-
-        android:clickable="true"
-
-        android:focusable="true"
-
-        android:hapticFeedbackEnabled="true"
-
-        android:soundEffectsEnabled="true"
-
-        android:backgroundTint="#007A83"
-
-        android:text="PIMS MOBILE   ▼"
-
-        android:textColor="#FFFFFF"
-
-        android:textStyle="bold"
-
-        android:textSize="17sp" />
+        android:visibility="gone" />
 
 
 
