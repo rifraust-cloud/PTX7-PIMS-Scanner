@@ -2853,9 +2853,14 @@ class MainActivity : ComponentActivity() {
             isFocusable = true
             isFocusableInTouchMode = true
             isCursorVisible = false
-            setBackgroundColor(if (NATIVE_CAPTURE_DIAGNOSTIC) android.graphics.Color.WHITE else android.graphics.Color.TRANSPARENT)
+            background = if (NATIVE_CAPTURE_DIAGNOSTIC) android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.WHITE)
+                setStroke(4, android.graphics.Color.rgb(0, 122, 131))
+                cornerRadius = 12f
+            } else null
             setTextColor(if (NATIVE_CAPTURE_DIAGNOSTIC) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT)
             textSize = if (NATIVE_CAPTURE_DIAGNOSTIC) 24f else textSize
+            minHeight = if (NATIVE_CAPTURE_DIAGNOSTIC) 84 else 1
             hint = if (NATIVE_CAPTURE_DIAGNOSTIC) "Scan 360505083350 here" else ""
             setPadding(18, 14, 18, 14)
             inputType = InputType.TYPE_CLASS_TEXT or
@@ -2888,7 +2893,7 @@ class MainActivity : ComponentActivity() {
             setPadding(16, 12, 16, 12)
             setBackgroundColor(android.graphics.Color.rgb(225, 245, 246))
             addView(TextView(this@MainActivity).apply {
-                text = "SCANNER CAPTURE TEST — PIMS DELIVERY DISABLED"
+                text = "SCANNER CAPTURE TEST 2 — NATIVE FOCUS LOCKED"
                 textSize = 16f
                 setTextColor(android.graphics.Color.rgb(0, 90, 97))
             })
@@ -2903,6 +2908,12 @@ class MainActivity : ComponentActivity() {
             Gravity.BOTTOM
         )
         addContentView(hardwareCapturePanel, panelParams)
+        hardwareScanCapture.setOnFocusChangeListener { _, hasFocus ->
+            recordDiagnosticEvent("Native EditText focus changed: $hasFocus currentFocus=${focusDescription()}")
+            if (NATIVE_CAPTURE_DIAGNOSTIC && receivingModeOpen && !hasFocus) {
+                hardwareScanCapture.postDelayed({ updateHardwareScanFocus() }, 80L)
+            }
+        }
         hardwareScanCapture.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -2960,10 +2971,23 @@ class MainActivity : ComponentActivity() {
         hardwareScanCapture.postDelayed({ updateHardwareScanFocus() }, 30L)
     }
 
+    private fun setWebViewFocusableForCapture(enabled: Boolean) {
+        if (!::webView.isInitialized) return
+        if (enabled) {
+            webView.isFocusable = true
+            webView.isFocusableInTouchMode = true
+        } else {
+            webView.clearFocus()
+            webView.isFocusable = false
+            webView.isFocusableInTouchMode = false
+        }
+    }
+
     private fun updateHardwareScanFocus() {
         if (!::hardwareScanCapture.isInitialized || !::webView.isInitialized) return
         val shouldCapture = receivingModeOpen && (NATIVE_CAPTURE_DIAGNOSTIC || assistantOwnsScanNative)
         if (shouldCapture) {
+            if (NATIVE_CAPTURE_DIAGNOSTIC) setWebViewFocusableForCapture(false)
             if (::hardwareCapturePanel.isInitialized) hardwareCapturePanel.visibility =
                 if (NATIVE_CAPTURE_DIAGNOSTIC) View.VISIBLE else View.GONE
             hardwareScanCapture.visibility = View.VISIBLE
@@ -2983,6 +3007,7 @@ class MainActivity : ComponentActivity() {
             }, 60L)
             if (NATIVE_CAPTURE_DIAGNOSTIC) refreshCaptureDiagnosticStatus("Scanner ready only when READY=true.")
         } else {
+            if (NATIVE_CAPTURE_DIAGNOSTIC) setWebViewFocusableForCapture(true)
             if (::hardwareCapturePanel.isInitialized) hardwareCapturePanel.visibility = View.GONE
             hardwareScanCapture.removeCallbacks(hardwareCaptureFlushRunnable)
             updatingHardwareScanCapture = true
