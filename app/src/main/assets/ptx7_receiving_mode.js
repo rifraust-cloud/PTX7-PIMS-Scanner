@@ -1253,8 +1253,8 @@
       'route: ' + location.pathname + location.search,
       'phase: ' + state.phase,
       'focusMode: ' + (state.releaseFocus ? 'RELEASED (scan goes to PIMS)' :
-        ((window.PTX7Host && window.PTX7Host.requestScanFocus) ?
-          'CAPTURED (native Android field)' : 'CAPTURED (WebView overlay input)')),
+        (NATIVE_CAPTURE_TEST ? 'CAPTURED (native Android test field)' :
+          'HYBRID (PM86 WebView input + RS Activity KeyEvents)')),
       'activeElement: ' + aeDesc,
       'currentPo: ' + (currentPo() || '(none)'),
       'progress: ' + (prog ? prog.received + '/' + prog.total : '(none)'),
@@ -1373,6 +1373,7 @@
 
   function focusCapture() {
     if (root.style.display !== 'block') return;
+    if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
     if (NATIVE_CAPTURE_TEST) {
       releaseFocusToPims();
       try {
@@ -1381,22 +1382,14 @@
       } catch (error) { setDebug('CAPTURE TEST focus error: ' + (error.message || error)); }
       return;
     }
-    if (!assistantOwnsScan()) { releaseFocusToPims(); return; }
-    try {
-      // This asset runs inside the Android app. If the host exposes a native
-      // focus request, it is the only scanner owner; never fall back to the
-      // WebView input, which split the leading HID character into PIMS.
-      if (window.PTX7Host && window.PTX7Host.requestScanFocus) {
-        releaseFocusToPims();
-        window.PTX7Host.requestScanFocus();
-        return;
-      }
-    } catch (e) {
-      setDebug('native scan focus request failed: ' + (e.message || e));
-      return;
-    }
-    try { capture.focus({ preventScroll: true }); } catch (e1) { try { capture.focus(); } catch (e2) {} }
+    // Production hybrid capture:
+    // - PM86 ScanSetting/IME commits into this focused WebView input.
+    // - RS5100/RS6100 hardware KeyEvents are consumed by MainActivity before
+    //   reaching WebView and enter through onHostScanTrace.
+    try { capture.focus({ preventScroll: true }); }
+    catch (e1) { try { capture.focus(); } catch (e2) {} }
   }
+
   capture.addEventListener('blur', function () {
     if (root.style.display === 'block' && assistantOwnsScan()) setTimeout(focusCapture, 10);
   });

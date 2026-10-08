@@ -2994,7 +2994,20 @@ class MainActivity : ComponentActivity() {
 
     private fun updateHardwareScanFocus() {
         if (!::hardwareScanCapture.isInitialized) return
-        if (!NATIVE_CAPTURE_DIAGNOSTIC && !::webView.isInitialized) return
+        if (!NATIVE_CAPTURE_DIAGNOSTIC) {
+            // Production uses WebView input for PM86 IME text and Activity
+            // dispatchKeyEvent for RS HID keys. The native diagnostic EditText
+            // must remain detached from focus or it disables the PM86 path.
+            if (::hardwareCapturePanel.isInitialized) hardwareCapturePanel.visibility = View.GONE
+            hardwareScanCapture.clearFocus()
+            hardwareScanCapture.visibility = View.GONE
+            if (::webView.isInitialized) {
+                webView.isFocusable = true
+                webView.isFocusableInTouchMode = true
+            }
+            return
+        }
+        if (!::webView.isInitialized && !NATIVE_CAPTURE_DIAGNOSTIC) return
         val shouldCapture = receivingModeOpen && (NATIVE_CAPTURE_DIAGNOSTIC || assistantOwnsScanNative)
         if (shouldCapture) {
             if (NATIVE_CAPTURE_DIAGNOSTIC) setWebViewFocusableForCapture(false)
