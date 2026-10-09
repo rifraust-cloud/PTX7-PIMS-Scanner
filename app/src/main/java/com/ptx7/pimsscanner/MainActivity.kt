@@ -2816,14 +2816,22 @@ class MainActivity : ComponentActivity() {
         webView.evaluateJavascript("window.__ptx7RxReopen = true;", null)
         webView.evaluateJavascript(js) {
             webView.evaluateJavascript(
-                "if (window.__ptx7Rx) window.__ptx7Rx.open();", null
-            )
+                "(function(){if(window.__ptx7Rx){window.__ptx7Rx.open();return true;}return false;})()"
+            ) { opened ->
+                if (opened?.contains("true") == true) {
+                    statusText.text = "Receiving Mode"
+                } else {
+                    receivingModeOpen = false
+                    workflowBar.visibility = View.VISIBLE
+                    statusText.text = "Receiving interface unavailable — reload PIMS and retry"
+                    toast("Receiving interface did not open")
+                }
+            }
         }
         receivingModeInstalled = true
         receivingModeOpen = true
-        workflowBar.visibility = View.GONE
+        workflowBar.visibility = View.VISIBLE
         scanBuffer.setLength(0)
-        statusText.text = "Receiving Mode"
     }
 
     // ------------------------------------------------------------------

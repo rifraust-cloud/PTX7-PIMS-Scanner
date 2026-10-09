@@ -604,7 +604,7 @@
         <LinearLayout
             android:id="@+id/workflowBar"
             android:layout_width="match_parent"
-            android:layout_height="84dp"
+            android:layout_height="76dp"
             android:layout_gravity="bottom"
             android:orientation="horizontal"
             android:gravity="center"
@@ -615,38 +615,41 @@
             <Button
                 android:id="@+id/receiveModeButton"
                 android:layout_width="0dp"
-                android:layout_height="68dp"
+                android:layout_height="60dp"
                 android:layout_weight="1"
                 android:layout_margin="4dp"
                 android:backgroundTint="#007A83"
                 android:text="RECEIVING"
+                android:maxLines="1"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
-                android:textSize="18sp" />
+                android:textSize="13sp" />
 
             <Button
                 android:id="@+id/inventoryModeButton"
                 android:layout_width="0dp"
-                android:layout_height="68dp"
+                android:layout_height="60dp"
                 android:layout_weight="1"
                 android:layout_margin="4dp"
                 android:backgroundTint="#007A83"
                 android:text="INVENTORY"
+                android:maxLines="1"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
-                android:textSize="18sp" />
+                android:textSize="13sp" />
 
             <Button
                 android:id="@+id/locationModeButton"
                 android:layout_width="0dp"
-                android:layout_height="68dp"
+                android:layout_height="60dp"
                 android:layout_weight="1.35"
                 android:layout_margin="4dp"
                 android:backgroundTint="#007A83"
                 android:text="STOCK LOCATION MGR"
+                android:maxLines="2"
                 android:textColor="#FFFFFF"
                 android:textStyle="bold"
-                android:textSize="16sp" />
+                android:textSize="12sp" />
         </LinearLayout>
 
 </FrameLayout>
