@@ -508,7 +508,8 @@
   var bar = document.createElement('div');
   bar.id = 'ptx7-rx-bar';
   bar.innerHTML = '<button class="back" type="button" id="ptx7-rx-back">\u2039 PIMS</button>' +
-    '<div class="title">RECEIVING</div><div class="spacer"></div>';
+    '<div class="title">RECEIVING</div>' +
+    '<button class="back gear" type="button" id="ptx7-rx-gear" aria-label="Tools and settings">\u2699</button>';
   root.appendChild(bar);
 
   var dots = document.createElement('div');
