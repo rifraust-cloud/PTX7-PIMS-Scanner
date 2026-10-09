@@ -54,35 +54,36 @@
   var style = document.createElement('style');
   style.id = 'ptx7-pims-tools-style';
   style.textContent =
-    'html.ptx7-simple-pims body{font-size:18px!important}' +
-    'html.ptx7-simple-pims input,html.ptx7-simple-pims textarea,html.ptx7-simple-pims select{min-height:54px!important;font-size:20px!important;padding:10px!important}' +
-    'html.ptx7-simple-pims button{min-height:52px!important;font-size:18px!important;padding:10px 16px!important}' +
-    'html.ptx7-simple-pims table{font-size:18px!important;line-height:1.35!important}' +
-    'html.ptx7-simple-pims th,html.ptx7-simple-pims td{padding:12px 10px!important}' +
-    'html.ptx7-simple-pims h1{font-size:36px!important}html.ptx7-simple-pims h2{font-size:28px!important}' +
-    'html.ptx7-simple-pims [role="dialog"]{font-size:19px!important;max-width:94vw!important}' +
-    '#ptx7-inventory-root{position:fixed;inset:0 0 84px 0;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:18px Arial,Helvetica,sans-serif;overflow:auto}' +
+    'html.ptx7-simple-pims body{font-size:30px!important}' +
+    'html.ptx7-simple-pims input,html.ptx7-simple-pims textarea,html.ptx7-simple-pims select{min-height:82px!important;font-size:32px!important;padding:16px!important}' +
+    'html.ptx7-simple-pims button{min-height:78px!important;font-size:30px!important;padding:15px 22px!important}' +
+    'html.ptx7-simple-pims table{font-size:28px!important;line-height:1.4!important}' +
+    'html.ptx7-simple-pims th,html.ptx7-simple-pims td{padding:18px 14px!important}' +
+    'html.ptx7-simple-pims h1{font-size:54px!important}html.ptx7-simple-pims h2{font-size:44px!important}' +
+    'html.ptx7-simple-pims [role="dialog"]{font-size:30px!important;max-width:96vw!important}' +
+    '#ptx7-inventory-root{position:fixed;inset:0 0 84px 0;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow:auto}' +
     '#ptx7-inventory-root *{box-sizing:border-box}' +
-    '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:16px 18px;font-size:32px;font-weight:900;text-align:center}' +
-    '#ptx7-inventory-content{padding:16px;max-width:1100px;width:100%;margin:0 auto}' +
-    '#ptx7-inventory-search{display:grid;grid-template-columns:1fr auto;gap:10px;background:#fff;padding:14px;border-radius:14px;box-shadow:0 2px 10px #0002}' +
-    '#ptx7-inventory-input{width:100%;min-height:66px;border:3px solid #007a83;border-radius:10px;padding:10px 14px;font-size:23px}' +
-    '#ptx7-inventory-submit{min-width:135px;border:0;border-radius:10px;background:#007a83;color:#fff;font-size:22px;font-weight:900;padding:10px 18px}' +
-    '#ptx7-inventory-hint{grid-column:1/-1;color:#59636b;font-weight:700;font-size:16px}' +
-    '#ptx7-inventory-message{display:none;margin:12px 0;padding:13px;border-radius:10px;background:#fff4e5;color:#8a4b00;font-weight:900}' +
-    '#ptx7-inventory-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}' +
-    '#ptx7-inventory-actions button,#ptx7-inventory-detail{min-height:58px;border:0;border-radius:10px;background:#075f67;color:#fff;font-size:18px;font-weight:900;padding:10px}' +
-    '#ptx7-inventory-detail{width:100%;background:#fff;color:#172b3a;border:2px solid #007a83;margin:0 0 14px}' +
-    '.ptx7-card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 9px #0002}' +
-    '.ptx7-card h2{font-size:26px;margin:0 0 12px}.ptx7-product{font-size:27px;font-weight:900;line-height:1.2}.ptx7-ndc{font-size:21px;margin-top:8px}' +
-    '.ptx7-metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.ptx7-metric{background:#eef7f8;border-radius:10px;padding:13px;font-size:20px;font-weight:900}' +
-    '.ptx7-table-wrap{overflow:auto}.ptx7-table{width:100%;border-collapse:collapse;font-size:17px}.ptx7-table th{background:#e8edef;text-align:left}.ptx7-table th,.ptx7-table td{padding:11px 9px;border-bottom:1px solid #cdd5db;vertical-align:top}' +
-    '.ptx7-po-link{border:0;background:transparent;color:#007a83;text-decoration:underline;font:900 17px Arial;padding:0;min-height:0}' +
-    '.ptx7-empty{color:#59636b;font-style:italic}.ptx7-native-copy{white-space:pre-wrap;line-height:1.45;max-height:440px;overflow:auto}' +
-    '#ptx7-full-view-toggle,#ptx7-receive-current-po{position:fixed;right:12px;bottom:94px;z-index:2147483645;display:none;min-height:58px;border:0;border-radius:10px;background:#075f67;color:#fff;font:900 18px Arial;padding:11px 16px;box-shadow:0 4px 14px #0005}' +
-    '#ptx7-receive-current-po{left:12px;right:12px;background:#007a83;font-size:24px}' +
-    '#ptx7-route-message{position:fixed;left:12px;right:12px;top:10px;z-index:2147483646;display:none;padding:12px;border-radius:9px;background:#fff4e5;color:#8a4b00;font:900 17px Arial;box-shadow:0 4px 14px #0004}' +
-    '@media(max-width:700px){#ptx7-inventory-head{font-size:28px}#ptx7-inventory-search{grid-template-columns:1fr}#ptx7-inventory-submit{width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}';
+    '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
+    '#ptx7-inventory-content{padding:24px;max-width:none;width:100%;margin:0 auto}' +
+    '#ptx7-inventory-search{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:16px;background:#fff;padding:22px;border:5px solid #007a83;border-radius:20px;box-shadow:0 5px 18px #0003}' +
+    '#ptx7-inventory-scan-icon{font:900 48px monospace;color:#007a83;text-align:center;letter-spacing:-5px}' +
+    '#ptx7-inventory-input{width:100%;min-height:100px;border:5px solid #007a83;border-radius:15px;padding:16px 20px;font-size:38px;font-weight:800}' +
+    '#ptx7-inventory-submit{min-width:210px;min-height:100px;border:0;border-radius:15px;background:#007a83;color:#fff;font-size:34px;font-weight:900;padding:16px 24px}' +
+    '#ptx7-inventory-hint{grid-column:1/-1;color:#394b59;font-weight:800;font-size:27px;line-height:1.35}' +
+    '#ptx7-inventory-message{display:none;margin:18px 0;padding:20px;border:4px solid #f0a000;border-radius:14px;background:#fff4e5;color:#8a4b00;font-size:28px;font-weight:900}' +
+    '#ptx7-inventory-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:22px 0}' +
+    '#ptx7-inventory-actions button,#ptx7-inventory-detail{min-height:90px;border:0;border-radius:15px;background:#075f67;color:#fff;font-size:29px;font-weight:900;padding:16px}' +
+    '#ptx7-inventory-detail{width:100%;background:#fff;color:#172b3a;border:5px solid #007a83;margin:0 0 20px}' +
+    '.ptx7-card{background:#fff;border:4px solid #c5d2d8;border-radius:20px;padding:24px;margin:18px 0;box-shadow:0 4px 14px #0002}' +
+    '.ptx7-card h2{font-size:42px;margin:0 0 18px;border-bottom:4px solid #007a83;padding-bottom:10px}.ptx7-product{font-size:44px;font-weight:900;line-height:1.2}.ptx7-ndc{font-size:34px;margin-top:12px}' +
+    '.ptx7-metrics{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}.ptx7-metric{background:#eef7f8;border:3px solid #9cc9cd;border-radius:15px;padding:20px;font-size:32px;font-weight:900}' +
+    '.ptx7-table-wrap{overflow:auto}.ptx7-table{width:100%;border-collapse:collapse;font-size:28px}.ptx7-table th{background:#dce7ea;text-align:left}.ptx7-table th,.ptx7-table td{padding:18px 14px;border-bottom:3px solid #b8c6cc;vertical-align:top}' +
+    '.ptx7-po-link{border:0;background:transparent;color:#007a83;text-decoration:underline;font:900 28px Arial;padding:4px;min-height:0}' +
+    '.ptx7-empty{color:#394b59;font-size:30px;font-style:italic}.ptx7-native-copy{white-space:pre-wrap;line-height:1.5;max-height:700px;overflow:auto;font-size:28px}' +
+    '#ptx7-full-view-toggle,#ptx7-receive-current-po{position:fixed;right:18px;bottom:100px;z-index:2147483645;display:none;min-height:90px;border:0;border-radius:15px;background:#075f67;color:#fff;font:900 30px Arial;padding:16px 22px;box-shadow:0 5px 18px #0005}' +
+    '#ptx7-receive-current-po{left:18px;right:18px;background:#007a83;font-size:38px;border:4px solid #fff}' +
+    '#ptx7-route-message{position:fixed;left:18px;right:18px;top:16px;z-index:2147483646;display:none;padding:20px;border:4px solid #f0a000;border-radius:14px;background:#fff4e5;color:#8a4b00;font:900 28px Arial;box-shadow:0 5px 18px #0004}' +
+    '@media(max-width:900px){#ptx7-inventory-search{grid-template-columns:90px 1fr}#ptx7-inventory-submit{grid-column:1/-1;width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}';
   document.head.appendChild(style);
 
   var inventoryRoot = document.createElement('section');
@@ -91,6 +92,7 @@
     '<header id="ptx7-inventory-head">INVENTORY</header>' +
     '<main id="ptx7-inventory-content">' +
       '<div id="ptx7-inventory-search">' +
+        '<div id="ptx7-inventory-scan-icon" aria-hidden="true">||| || |||</div>' +
         '<input id="ptx7-inventory-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan medication barcode or enter NDC-11" aria-label="Inventory NDC search">' +
         '<button id="ptx7-inventory-submit" type="button">SEARCH</button>' +
         '<div id="ptx7-inventory-hint">Hardware scans accept UPC, GTIN, GS1, or NDC. Manual entry requires an 11-digit NDC.</div>' +
@@ -102,9 +104,9 @@
         '<button type="button" id="ptx7-show-full-inventory">FULL PIMS INVENTORY</button>' +
       '</div>' +
       '<select id="ptx7-inventory-detail" aria-label="Inventory detail">' +
-        '<option value="overview">OVERVIEW</option><option value="locations">LOCATIONS</option>' +
-        '<option value="incoming">INCOMING POs</option><option value="transactions">TRANSACTIONS</option>' +
-        '<option value="all">SHOW ALL</option>' +
+        '<option value="all" selected>SHOW ALL</option><option value="overview">OVERVIEW</option>' +
+        '<option value="locations">LOCATIONS</option><option value="incoming">INCOMING POs</option>' +
+        '<option value="transactions">TRANSACTIONS</option>' +
       '</select>' +
       '<div id="ptx7-inventory-results"><div class="ptx7-card ptx7-empty">Scan a medication barcode or enter an NDC-11.</div></div>' +
     '</main>';
@@ -168,35 +170,18 @@
     input.dispatchEvent(new Event('change', {bubbles:true}));
   }
 
-  function normalizeHardwareNdc(raw) {
-    try {
-      if (window.__ptx7Rx && window.__ptx7Rx.normalizeNdc) {
-        var resolved = window.__ptx7Rx.normalizeNdc(raw);
-        if (resolved) return resolved;
-      }
-    } catch (_) {}
-    var compact = String(raw || '').replace(/\s+/g, '').match(/^01(\d{14})/);
-    var digits = compact ? compact[1] : String(raw || '').replace(/\D/g, '');
-    if (digits.length === 14 && digits.slice(0, 2) === '00') digits = digits.slice(2);
-    if (digits.length === 12 && digits.charAt(0) === '3') return '0' + digits.slice(1, 11);
-    if (digits.length === 13 && digits.slice(0, 2) === '03') return '0' + digits.slice(2, 12);
-    if (digits.length === 11) return digits;
-    if (digits.length === 10) return '0' + digits;
-    if (digits.length === 12) return digits.slice(1);
-    if (digits.length === 13) return digits.slice(2);
-    if (digits.length === 14) return digits.slice(2, 13);
-    return '';
-  }
-
   function submitInventorySearch(raw, scannerInput) {
     var typed = normalize(raw);
-    var ndc = scannerInput ? normalizeHardwareNdc(typed) : typed.replace(/\D/g, '');
-    if (!scannerInput && !/^\d{11}$/.test(ndc)) {
+    // Hardware scanner payloads must reach PIMS exactly as emitted. PIMS
+    // understands package UPC/GTIN/GS1 values such as 313811719109. Converting
+    // that payload to a guessed NDC-11 can insert padding in the wrong segment.
+    var searchValue = scannerInput ? typed : typed.replace(/\D/g, '');
+    if (!scannerInput && !/^\d{11}$/.test(searchValue)) {
       showMessage('Manual entry must be exactly 11 digits.', true);
       return false;
     }
-    if (!/^\d{11}$/.test(ndc)) {
-      showMessage('This barcode could not be converted to an NDC-11. Try the package NDC barcode.', true);
+    if (scannerInput && searchValue.length < 6) {
+      showMessage('The scanner value is incomplete. Scan the package again.', true);
       return false;
     }
     var input = nativeInventoryField();
@@ -205,13 +190,14 @@
       showMessage('PIMS Inventory search is not ready. Wait a moment and try again.', true);
       return false;
     }
-    inventoryInput.value = ndc;
-    setNativeValue(input, ndc);
-    lastSubmitted = ndc;
+    inventoryInput.value = searchValue;
+    setNativeValue(input, searchValue);
+    lastSubmitted = searchValue;
     lastSubmittedAt = Date.now();
     lastRenderSignature = '';
-    results.innerHTML = '<div class="ptx7-card"><strong>Searching PIMS for NDC ' + esc(ndc) + '…</strong></div>';
+    results.innerHTML = '<div class="ptx7-card"><strong>Searching PIMS for ' + esc(searchValue) + '…</strong></div>';
     submit.click();
+    setTimeout(function () { try { inventoryInput.focus({preventScroll:true}); } catch (_) {} }, 80);
     scheduleRender(250);
     scheduleRender(800);
     scheduleRender(1600);
@@ -471,8 +457,8 @@
 
   function maintain() {
     var mode = currentMode();
-    var simple = (mode === 'inventory' && inventorySimple) || (mode === 'locations' && locationsSimple);
-    document.documentElement.classList.toggle('ptx7-simple-pims', simple);
+    var enlarged = mode === 'inventory' || (mode === 'locations' && locationsSimple);
+    document.documentElement.classList.toggle('ptx7-simple-pims', enlarged);
     inventoryRoot.style.display = mode === 'inventory' && inventorySimple ? 'flex' : 'none';
     receivePoButton.style.display = mode === 'po' ? 'block' : 'none';
     if (mode === 'locations') {
@@ -494,7 +480,7 @@
     if (mode === 'inventory' && inventorySimple) {
       scheduleRender(120);
       var activeInventory = document.activeElement;
-      if (!activeInventory || activeInventory === document.body || activeInventory === document.documentElement) {
+      if (!activeInventory || !inventoryRoot.contains(activeInventory)) {
         try { inventoryInput.focus({preventScroll:true}); } catch (_) {}
       }
     }

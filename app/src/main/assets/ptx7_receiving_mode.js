@@ -180,7 +180,7 @@
       .filter(function (el) { return !(el.closest && el.closest('#ptx7-rx-root')); })
       .map(function (el) { return String(el.textContent || '').replace(/\s+/g, ' ').trim(); })
       .filter(function (t) {
-        return t && !/^inventory$/i.test(t) && !/incoming purchases|transaction history/i.test(t);
+        return t && !/^inventory$/i.test(t) && !/pharmacy inventory management console|incoming purchases|transaction history/i.test(t);
       });
     return hs[0] || '';
   }
@@ -483,27 +483,27 @@
   // Visual-only handheld sizing overrides. Existing render/state/scanner
   // functions remain unchanged from confirmed working build #49.
   STYLE.textContent +=
-    '#ptx7-rx-root{overflow:auto;background:#fff;bottom:76px!important}' +
-    '#ptx7-rx-bar{min-height:72px;padding:10px 14px;position:sticky;top:0;z-index:4}' +
-    '#ptx7-rx-bar .title{font-size:34px}' +
-    '#ptx7-rx-bar .back,#ptx7-rx-bar .gear{width:58px;height:58px;font-size:28px}' +
-    '#ptx7-rx-body{padding:20px 18px 120px;max-width:100%;min-height:calc(100vh - 110px)}' +
-    '.ptx7-rx-step{font-size:24px;margin:12px 0 8px}' +
-    '.ptx7-rx-head{font-size:42px;line-height:1.08;margin:14px 0}' +
-    '.ptx7-rx-sub{font-size:23px;line-height:1.35;margin:10px 0 18px}' +
-    '.ptx7-rx-scanbox{min-height:210px;display:flex;flex-direction:column;justify-content:center;padding:30px 18px}' +
-    '.ptx7-rx-scanbox .glyph{font-size:72px}.ptx7-rx-scanbox .label{font-size:38px}' +
-    '.ptx7-rx-btn{min-height:84px;font-size:30px;margin:16px 0}' +
-    '.ptx7-rx-btn .meta{font-size:21px}' +
-    '.ptx7-rx-success{padding:28px 20px;border-radius:22px}' +
-    '.ptx7-rx-success .loc{font-size:64px;line-height:1.05}' +
-    '.ptx7-rx-success .drug{font-size:27px;line-height:1.2}' +
-    '.ptx7-rx-confirm{font-size:30px;padding:24px 18px}.ptx7-rx-confirm .meta{font-size:21px}' +
-    '#ptx7-rx-submit-fixed{position:fixed;right:18px;bottom:100px;z-index:8;min-width:42%;min-height:76px;border:0;border-radius:15px;background:#007a83;color:#fff;font:900 27px Arial;box-shadow:0 6px 18px #0005;padding:12px 18px}' +
-    '#ptx7-rx-new-po{position:fixed;left:18px;bottom:100px;z-index:8;display:none;min-width:42%;min-height:76px;border:3px solid #007a83;border-radius:15px;background:#fff;color:#007a83;font:900 24px Arial;box-shadow:0 6px 18px #0003;padding:12px 18px}' +
+    '#ptx7-rx-root{overflow:auto;background:#fff;bottom:84px!important}' +
+    '#ptx7-rx-bar{min-height:112px;padding:16px 22px;position:sticky;top:0;z-index:4;border-bottom:6px solid #005a61}' +
+    '#ptx7-rx-bar .title{font-size:54px}' +
+    '#ptx7-rx-bar .back,#ptx7-rx-bar .gear{width:96px;height:84px;font-size:38px;padding:8px}' +
+    '#ptx7-rx-body{padding:32px 28px 190px;max-width:100%;min-height:calc(100vh - 150px)}' +
+    '.ptx7-rx-step{font-size:38px;margin:18px 0 12px}' +
+    '.ptx7-rx-head{font-size:64px;line-height:1.12;margin:22px 0}' +
+    '.ptx7-rx-sub{font-size:36px;line-height:1.4;margin:16px 0 26px}' +
+    '.ptx7-rx-scanbox{min-height:330px;display:flex;flex-direction:column;justify-content:center;padding:46px 26px;border-width:9px}' +
+    '.ptx7-rx-scanbox .glyph{font-size:112px}.ptx7-rx-scanbox .label{font-size:60px}' +
+    '.ptx7-rx-btn{min-height:132px;font-size:48px;margin:24px 0;border-radius:24px}' +
+    '.ptx7-rx-btn .meta{font-size:34px;margin-top:14px}' +
+    '.ptx7-rx-success{padding:42px 28px;border-radius:26px}' +
+    '.ptx7-rx-success .big{font-size:64px}.ptx7-rx-success .loc{font-size:94px;line-height:1.08}' +
+    '.ptx7-rx-success .drug{font-size:42px;line-height:1.25}' +
+    '.ptx7-rx-confirm{font-size:46px;padding:38px 26px}.ptx7-rx-confirm .meta{font-size:34px}' +
+    '#ptx7-rx-submit-fixed{position:fixed;right:24px;bottom:108px;z-index:8;min-width:42%;min-height:112px;border:0;border-radius:18px;background:#007a83;color:#fff;font:900 38px Arial;box-shadow:0 6px 18px #0005;padding:16px 22px}' +
+    '#ptx7-rx-new-po{position:fixed;left:24px;bottom:108px;z-index:8;display:none;min-width:42%;min-height:112px;border:5px solid #007a83;border-radius:18px;background:#fff;color:#007a83;font:900 36px Arial;box-shadow:0 6px 18px #0003;padding:16px 22px}' +
     '#ptx7-rx-submit-fixed:disabled{background:#98a2b3;color:#e9edf1;box-shadow:none}' +
-    '#ptx7-rx-foot{font-size:15px;min-height:38px}' +
-    '@media(max-width:700px){#ptx7-rx-bar .title{font-size:30px}.ptx7-rx-head{font-size:37px}.ptx7-rx-success .loc{font-size:52px}.ptx7-rx-btn{font-size:26px}}';
+    '#ptx7-rx-foot{font-size:26px;min-height:58px;padding:16px}' +
+    '@media(max-width:900px){#ptx7-rx-bar .title{font-size:46px}.ptx7-rx-head{font-size:56px}.ptx7-rx-success .loc{font-size:80px}.ptx7-rx-btn{font-size:42px}}';
   root.appendChild(STYLE);
 
   var bar = document.createElement('div');
@@ -642,23 +642,28 @@
   // Audio feedback (Web Audio, no assets)
   // ---------------------------------------------------------------------------
   var audioCtx = null;
+  var SOUND_STYLE_KEY = 'ptx7_rx_sound_style';
+  var SOUND_VOLUME_KEY = 'ptx7_rx_sound_volume';
+  function soundStyle(){ try{return localStorage.getItem(SOUND_STYLE_KEY)||'gentle';}catch(e){return 'gentle';} }
+  function soundVolume(){ var value='low';try{value=localStorage.getItem(SOUND_VOLUME_KEY)||'low';}catch(e){}return {low:0.025,medium:0.05,high:0.09}[value]||0.025; }
   function tone(ok) {
     try {
+      var style=soundStyle();if(style==='muted')return;
       var Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       audioCtx = audioCtx || new Ctx();
       if (audioCtx.state === 'suspended') audioCtx.resume();
-      var seq = ok ? [[1320, 0, 0.09], [1760, 0.11, 0.18]] : [[300, 0, 0.22], [180, 0.24, 0.34]];
-      var t0 = audioCtx.currentTime + 0.02;
-      seq.forEach(function (n) {
-        var osc = audioCtx.createOscillator(), g = audioCtx.createGain();
-        osc.type = ok ? 'square' : 'sawtooth';
-        osc.frequency.setValueAtTime(n[0], t0 + n[1]);
-        g.gain.setValueAtTime(0.0001, t0 + n[1]);
-        g.gain.exponentialRampToValueAtTime(0.3, t0 + n[1] + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + n[1] + n[2]);
-        osc.connect(g); g.connect(audioCtx.destination);
-        osc.start(t0 + n[1]); osc.stop(t0 + n[1] + n[2] + 0.03);
+      var gentle=style==='gentle';
+      var seq=gentle?(ok?[[560,0,0.11],[720,0.13,0.20]]:[[240,0,0.16],[190,0.18,0.26]]):(ok?[[980,0,0.08],[1280,0.10,0.16]]:[[300,0,0.18],[190,0.20,0.28]]);
+      var peak=soundVolume(),t0=audioCtx.currentTime+0.02;
+      seq.forEach(function(n){
+        var osc=audioCtx.createOscillator(),g=audioCtx.createGain();
+        osc.type=gentle?'sine':(ok?'square':'sawtooth');
+        osc.frequency.setValueAtTime(n[0],t0+n[1]);
+        g.gain.setValueAtTime(0.0001,t0+n[1]);
+        g.gain.exponentialRampToValueAtTime(peak,t0+n[1]+0.025);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+n[1]+n[2]);
+        osc.connect(g);g.connect(audioCtx.destination);osc.start(t0+n[1]);osc.stop(t0+n[1]+n[2]+0.03);
       });
     } catch (e) {}
   }
@@ -700,15 +705,18 @@
 
   var settings=document.createElement('section');
   settings.id='ptx7-rx-settings';
-  settings.style.cssText='position:fixed;inset:72px 0 0;z-index:20;display:none;background:#fff;padding:22px;overflow:auto;font:900 21px Arial;color:#172b3a';
-  settings.innerHTML='<h2 style="font-size:38px;margin:0 0 18px">TOOLS / SETTINGS</h2>'+
-    '<label style="display:block;margin:14px 0">LOCATION VOICE <select id="ptx7-voice-on" style="width:100%;height:58px;font-size:20px"><option value="on">ON</option><option value="off">MUTED</option></select></label>'+
-    '<label style="display:block;margin:14px 0">VOICE <select id="ptx7-voice-name" style="width:100%;height:58px;font-size:20px"></select></label>'+
-    '<label style="display:block;margin:14px 0">SPEED <select id="ptx7-voice-rate" style="width:100%;height:58px;font-size:20px"><option value="0.85">0.85×</option><option value="1">1.00×</option><option value="1.15">1.15×</option><option value="1.3">1.30×</option></select></label>'+
-    '<label style="display:block;margin:14px 0">ORIENTATION <select id="ptx7-orientation" style="width:100%;height:58px;font-size:20px"><option value="AUTO">AUTO ROTATE</option><option value="PORTRAIT">LOCK PORTRAIT</option><option value="LANDSCAPE">LOCK LANDSCAPE</option></select></label>'+
+  settings.style.cssText='position:fixed;inset:112px 0 84px;z-index:20;display:none;background:#fff;padding:34px;overflow:auto;font:900 34px Arial;color:#172b3a';
+  settings.innerHTML='<h2 style="font-size:56px;margin:0 0 26px;border-bottom:5px solid #007a83;padding-bottom:14px">TOOLS / SETTINGS</h2>'+
+    '<label style="display:block;margin:22px 0">SCAN TONES <select id="ptx7-sound-style" style="width:100%;height:88px;font-size:32px"><option value="gentle">GENTLE CHIME (DEFAULT)</option><option value="standard">STANDARD BEEP</option><option value="muted">MUTED</option></select></label>'+
+    '<label style="display:block;margin:22px 0">TONE VOLUME <select id="ptx7-sound-volume" style="width:100%;height:88px;font-size:32px"><option value="low">LOW (DEFAULT)</option><option value="medium">MEDIUM</option><option value="high">HIGH</option></select></label>'+
+    '<button id="ptx7-tone-preview" class="ptx7-rx-btn ghost">♪ PREVIEW TONE</button>'+
+    '<label style="display:block;margin:22px 0">LOCATION VOICE <select id="ptx7-voice-on" style="width:100%;height:88px;font-size:32px"><option value="on">ON</option><option value="off">MUTED</option></select></label>'+
+    '<label style="display:block;margin:22px 0">VOICE <select id="ptx7-voice-name" style="width:100%;height:88px;font-size:32px"></select></label>'+
+    '<label style="display:block;margin:22px 0">SPEED <select id="ptx7-voice-rate" style="width:100%;height:88px;font-size:32px"><option value="0.85">0.85×</option><option value="1">1.00×</option><option value="1.15">1.15×</option><option value="1.3">1.30×</option></select></label>'+
+    '<label style="display:block;margin:22px 0">ORIENTATION <select id="ptx7-orientation" style="width:100%;height:88px;font-size:32px"><option value="AUTO">AUTO ROTATE</option><option value="PORTRAIT">LOCK PORTRAIT</option><option value="LANDSCAPE">LOCK LANDSCAPE</option></select></label>'+
     '<button id="ptx7-voice-preview" class="ptx7-rx-btn primary">🔊 PREVIEW LOCATION</button>'+
     '<button id="ptx7-show-diag" class="ptx7-rx-btn ghost">SHOW DIAGNOSTIC</button>'+
-    '<textarea id="ptx7-settings-diag" readonly style="display:none;width:100%;height:240px;font:13px monospace"></textarea>'+
+    '<textarea id="ptx7-settings-diag" readonly style="display:none;width:100%;height:320px;font:22px monospace"></textarea>'+
     '<button id="ptx7-settings-done" class="ptx7-rx-btn primary">DONE</button>';
   root.appendChild(settings);
   function populateVoiceSettings(){
@@ -720,11 +728,17 @@
     state.releaseFocus=true;
     try{capture.blur();}catch(e){}
     try{if(window.PTX7Host&&window.PTX7Host.setScanOwnership)window.PTX7Host.setScanOwnership(false);}catch(e){}
+    settings.querySelector('#ptx7-sound-style').value=soundStyle();
+    var savedVolume='low';try{savedVolume=localStorage.getItem(SOUND_VOLUME_KEY)||'low';}catch(_){}
+    settings.querySelector('#ptx7-sound-volume').value=savedVolume;
     settings.querySelector('#ptx7-voice-on').value=voiceEnabled()?'on':'off';
     settings.querySelector('#ptx7-voice-rate').value=String(voiceRate());
     settings.querySelector('#ptx7-orientation').value=localStorage.getItem(ORIENTATION_KEY)||'AUTO';
     populateVoiceSettings();settings.style.display='block';
   }
+  settings.querySelector('#ptx7-sound-style').onchange=function(e){localStorage.setItem(SOUND_STYLE_KEY,e.target.value);};
+  settings.querySelector('#ptx7-sound-volume').onchange=function(e){localStorage.setItem(SOUND_VOLUME_KEY,e.target.value);};
+  settings.querySelector('#ptx7-tone-preview').onclick=function(){tone(true);};
   settings.querySelector('#ptx7-voice-on').onchange=function(e){localStorage.setItem(VOICE_ON_KEY,e.target.value==='on'?'true':'false');if(e.target.value==='off'&&window.speechSynthesis)window.speechSynthesis.cancel();};
   settings.querySelector('#ptx7-voice-name').onchange=function(e){localStorage.setItem(VOICE_NAME_KEY,e.target.value);};
   settings.querySelector('#ptx7-voice-rate').onchange=function(e){localStorage.setItem(VOICE_RATE_KEY,e.target.value);};

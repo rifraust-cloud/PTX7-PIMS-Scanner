@@ -121,6 +121,10 @@ class MainActivity : ComponentActivity() {
     // Prevent the FIT operation from being shown as manual zoom.
     private var restoringFit = false
 
+    // Authentication is always a centered, non-scrolling portrait screen.
+    // Authenticated PIMS restores the operator's saved orientation choice.
+    private var loginPresentationActive = false
+
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var barcodeScanner: BarcodeScanner
 
@@ -780,6 +784,71 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun applyLoginPresentation(url: String?, completed: (Boolean) -> Unit) {
+        val pageUrl = JSONObject.quote(url.orEmpty())
+        val javascript = """
+            (function(){
+              var suppliedUrl=$pageUrl;
+              var host=String(location.hostname||'').toLowerCase();
+              var route=String(location.pathname||'').toLowerCase();
+              var text=String((document.body&&document.body.innerText)||'').slice(0,5000);
+              var hasPassword=!!document.querySelector('input[type="password"]');
+              var authUrl=/midway|signin|login|sso|authenticate|oauth/.test(host+route+suppliedUrl.toLowerCase());
+              var authWords=/sign in|log in|authenticate|continue to|use your security key/i.test(text);
+              var isPims=/console\.inventory\.pharmacy\.amazon\.dev/.test(host);
+              var isLogin=hasPassword||authUrl||(!isPims&&authWords);
+              if(!isLogin)return false;
+
+              var viewport=document.querySelector('meta[name="viewport"]');
+              if(!viewport){viewport=document.createElement('meta');viewport.name='viewport';document.head.appendChild(viewport);}
+              viewport.setAttribute('content','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no');
+
+              var style=document.getElementById('ptx7-login-presentation');
+              if(!style){style=document.createElement('style');style.id='ptx7-login-presentation';document.head.appendChild(style);}
+              style.textContent=
+                'html,body{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;margin:0!important;overflow:hidden!important;overscroll-behavior:none!important;background:#f1f5f6!important}' +
+                'body{display:flex!important;align-items:center!important;justify-content:center!important;padding:24px!important;box-sizing:border-box!important;font-size:26px!important;touch-action:manipulation!important}' +
+                'body>div,main,[role="main"]{width:100%!important;max-width:760px!important;max-height:100%!important;margin:auto!important;overflow:hidden!important;box-sizing:border-box!important}' +
+                'form{width:100%!important;max-width:720px!important;margin:18px auto!important;padding:32px!important;border:5px solid #007a83!important;border-radius:22px!important;background:#fff!important;box-shadow:0 8px 26px #0003!important;overflow:hidden!important}' +
+                'img,svg{display:block!important;max-width:78%!important;height:auto!important;margin:18px auto!important;object-position:center!important}' +
+                'h1{font-size:46px!important;line-height:1.15!important;text-align:center!important;margin:16px 0 24px!important}' +
+                'h2,h3{font-size:36px!important;line-height:1.2!important;text-align:center!important}' +
+                'label,p,span{font-size:25px!important;line-height:1.35!important}' +
+                'input,select,button,a[role="button"]{width:100%!important;min-height:82px!important;margin:12px 0!important;padding:16px 20px!important;font-size:30px!important;border-radius:14px!important;box-sizing:border-box!important}' +
+                'button,a[role="button"],input[type="submit"]{background:#007a83!important;color:#fff!important;font-weight:900!important;border:0!important;text-align:center!important}' +
+                'hr{height:4px!important;border:0!important;background:#b7c8ce!important;margin:24px 0!important}';
+              document.documentElement.classList.add('ptx7-login-screen');
+              if(!window.__ptx7LoginScrollBlocked){
+                window.__ptx7LoginScrollBlocked=true;
+                var stop=function(event){event.preventDefault();};
+                document.addEventListener('touchmove',stop,{passive:false});
+                document.addEventListener('wheel',stop,{passive:false});
+                document.addEventListener('scroll',function(){window.scrollTo(0,0);},true);
+              }
+              window.scrollTo(0,0);
+              if(document.documentElement){document.documentElement.scrollLeft=0;document.documentElement.scrollTop=0;}
+              if(document.body){document.body.scrollLeft=0;document.body.scrollTop=0;}
+              return true;
+            })();
+        """.trimIndent()
+
+        webView.evaluateJavascript(javascript) { result ->
+            val isLogin = result?.contains("true") == true
+            runOnUiThread {
+                if (isLogin) {
+                    loginPresentationActive = true
+                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    workflowBar.visibility = View.GONE
+                } else {
+                    if (loginPresentationActive) applySavedOrientation()
+                    loginPresentationActive = false
+                    workflowBar.visibility = View.VISIBLE
+                }
+                completed(isLogin)
+            }
+        }
+    }
+
     private fun configureWebView() {
 
         webView.settings.javaScriptEnabled =
@@ -908,57 +977,32 @@ class MainActivity : ComponentActivity() {
                     )
 
 
-                    statusText.text =
+                    applyLoginPresentation(url) { isLogin ->
+                        if (isLogin) {
+                            statusText.text = "Sign in to PIMS"
+                        } else {
+                            statusText.text = "Integrated PIMS loaded"
 
-                        "Integrated PIMS loaded"
+                            /* Keep the proven wide PIMS viewport only after auth. */
+                            enablePimsPinchZoom()
 
+                            webView.postDelayed({
+                                if (fitScale <= 0f) fitScale = webView.scale
+                                lastKnownWebScale = webView.scale
+                                updateZoomLabel()
+                                injectPimsUiEnhancements()
+                                installReceivingMode()
+                                installPimsWorkflowTools()
 
-                    /*
-                     * Preserve PIMS's normal responsive width.
-                     *
-                     * Only remove restrictions that prevent zooming.
-                     */
-                    enablePimsPinchZoom()
-
-
-                    webView.postDelayed({
-
-                        /*
-                         * Capture the first successfully rendered PIMS scale
-                         * as the FIT baseline.
-                         *
-                         * We do NOT display this raw Android scale value.
-                         */
-                        if (
-                            fitScale <= 0f
-                        ) {
-
-                            fitScale =
-                                webView.scale
+                                // PO Search always starts from PIMS Inventory,
+                                // after that destination has finished loading.
+                                if (pendingReceivingSearch && url?.contains("/inventory", ignoreCase = true) == true) {
+                                    pendingReceivingSearch = false
+                                    openReceivingMode()
+                                }
+                            }, 500)
                         }
-
-
-                        lastKnownWebScale =
-                            webView.scale
-
-
-                        updateZoomLabel()
-
-
-                        injectPimsUiEnhancements()
-
-
-                        installReceivingMode()
-                        installPimsWorkflowTools()
-
-                        // PO Search always starts from PIMS Inventory, but only
-                        // after that destination has actually finished loading.
-                        if (pendingReceivingSearch && url?.contains("/inventory", ignoreCase = true) == true) {
-                            pendingReceivingSearch = false
-                            openReceivingMode()
-                        }
-
-                    }, 500)
+                    }
                 }
 
 
@@ -2745,11 +2789,11 @@ class MainActivity : ComponentActivity() {
             webView.requestLayout()
             webView.invalidate()
 
-            enablePimsPinchZoom()
-
-            injectPimsUiEnhancements()
-
-            centerActivePimsContent()
+            if (!loginPresentationActive) {
+                enablePimsPinchZoom()
+                injectPimsUiEnhancements()
+                centerActivePimsContent()
+            }
 
         }, 350)
     }
