@@ -224,26 +224,91 @@
   // When a drug has been scanned on the receiving page, PIMS shows a detail
   // panel that says "Scan Location to submit receives" with the drug, NDC, and
   // Suggested Locations. Returns that info, or null when no drug is pending.
+  function allLocationsIn(text) {
+    var found = {};
+    (String(text || '').toUpperCase().match(/\b(?:MAN(?:FW|WS)?|CLD[A-Z]*)\d{3,5}-[A-Z]-\d{1,2}\b/g) || [])
+      .forEach(function(location){ found[location] = true; });
+    return Object.keys(found).sort(function(a,b){ return a.localeCompare(b,undefined,{numeric:true}); });
+  }
+
+  function parseQuantityPair(value) {
+    var match = String(value || '').match(/(\d+)\s*\((\d+)\)/);
+    return match ? { pkgs:Number(match[1]), units:Number(match[2]) } : null;
+  }
+
+  function readTableByHeaders(table) {
+    if (!table) return [];
+    var headers = [].slice.call(table.querySelectorAll('thead th'));
+    if (!headers.length) headers = [].slice.call(table.querySelectorAll('tr:first-child th,tr:first-child td'));
+    var keys = headers.map(function(header){ return String(header.innerText || '').replace(/\s+/g,' ').trim().toLowerCase(); });
+    return [].slice.call(table.querySelectorAll('tbody tr')).map(function(row){
+      var result = {}, cells = [].slice.call(row.querySelectorAll(':scope > td,:scope > th'));
+      cells.forEach(function(cell,index){ result[keys[index] || ('col'+index)] = cell; });
+      return result;
+    });
+  }
+
+  function panelQuantity(scopeText,label) {
+    var match = String(scopeText || '').match(new RegExp(label + '\\s*:?\\s*(\\d+)\\s*\\((\\d+)\\)','i'));
+    return match ? { pkgs:Number(match[1]), units:Number(match[2]) } : null;
+  }
+
+  // Read only the active PIMS receive dialog, then match its Product Id to the
+  // side panel before using quantities/package details. Never use stale page text.
   function currentReceiveDetail() {
-    var t = pageText();
-    // Detect the "waiting for location" state via either the panel header or
-    // the modal prompt PIMS shows after a drug scan.
-    if (!/Scan Location to submit receives/i.test(t) &&
-        !/Complete receive before proceeding to next NDC/i.test(t)) return null;
-    var ndc = (t.match(/NDC:\s*(\d{9,14})/i) || [])[1] || '';
-    // Prefer a real location-code match (MANFW0102-D-11 / CLDxxxx-x-xx), which
-    // is unambiguous; fall back to the labeled "Suggested Locations:" text.
-    var loc = (t.match(/\b((?:MAN(?:FW|WS)?|CLD)[A-Z]*\d{3,5}-[A-Z]-\d{1,2})\b/i) || [])[1] || '';
-    if (!loc) {
-      loc = (t.match(/Suggested Locations?:\s*([A-Z0-9\-\/ ]+)/i) || [])[1] || '';
-      loc = loc.trim().split(/\s{2,}/)[0].trim();
+    var marker = /Complete receive before proceeding to next NDC|Scan Location to submit receives/i;
+    var dialog = [].slice.call(document.querySelectorAll('[role="dialog"],[role="alertdialog"]'))
+      .filter(function(element){ return !(element.closest && element.closest('#ptx7-rx-root')); })
+      .find(function(element){ return marker.test(element.textContent || ''); });
+    if (!dialog) return null;
+
+    var rowObjects = [];
+    [].slice.call(dialog.querySelectorAll('table')).forEach(function(table){ rowObjects = rowObjects.concat(readTableByHeaders(table)); });
+    var pending = rowObjects.find(function(row){
+      var cell = row['product id'] || row.productid || row.product;
+      return cell && /\d{6,}/.test(cell.innerText || '');
+    });
+    if (!pending) return null;
+
+    var productCell = pending['product id'] || pending.productid || pending.product;
+    var productId = String(productCell.innerText || '').replace(/\D/g,'');
+    var descriptionCell = pending.description || pending.desc;
+    var drug = descriptionCell ? String(descriptionCell.innerText || '').replace(/\s+/g,' ').trim() : '';
+    var scannedCell = pending['currently scanned'] || pending.scanned;
+    var scanned = scannedCell ? parseQuantityPair(scannedCell.innerText) : null;
+    var locationsCell = pending['suggested locations'] || pending['suggested location'] || pending.locations;
+    var locations = locationsCell ? allLocationsIn(locationsCell.innerText) : [];
+    if (!locations.length) locations = allLocationsIn(dialog.innerText);
+
+    var ordered = null, received = null, packageSize = 0, unitWord = 'units', warnings = [];
+    var sidePanels = [].slice.call(document.querySelectorAll('aside,section,div'))
+      .filter(function(element){
+        if (element.closest && element.closest('#ptx7-rx-root')) return false;
+        var text = element.innerText || '';
+        return productId && text.indexOf(productId) >= 0 && /Quantity (Ordered|Received)/i.test(text);
+      })
+      .sort(function(a,b){ return (a.innerText || '').length - (b.innerText || '').length; });
+    if (sidePanels.length) {
+      var sideText = String(sidePanels[0].innerText || '').replace(/\u00a0/g,' ');
+      ordered = panelQuantity(sideText,'Quantity Ordered');
+      received = panelQuantity(sideText,'Quantity Received');
+      var packageMatch = sideText.match(/Package Size\s*:?\s*(\d+(?:\.\d+)?)/i);
+      if (packageMatch) packageSize = Number(packageMatch[1]);
+      var unitMatch = sideText.match(/\d+\.?\d*\s*(Capsules?|Tablets?|Milliliters?|mL|Grams?|Each|Units?|Inhalers?|Sprays?)/i);
+      if (unitMatch) unitWord = unitMatch[1].toLowerCase();
+      if (/hazardous drug|special handling|N\s*Listed Hazard/i.test(sideText)) warnings.push('HAZARDOUS — Special Handling');
+      if (/cold chain|refrigerat/i.test(sideText)) warnings.push('COLD CHAIN');
+      if (!drug) {
+        var descriptionMatch = sideText.match(/([A-Z0-9][^\n]*?\((?:bottle|box|container|tube|each|carton)[^\n]*?\))/i);
+        if (descriptionMatch) drug = descriptionMatch[1].replace(/\s+/g,' ').trim();
+      }
     }
-    loc = loc.toUpperCase();
-    // Drug heading: the detail panel repeats the drug name near the NDC.
-    var drug = '';
-    var dm = t.match(/([A-Z][A-Za-z0-9][^\n]*?\((?:bottle|box|container|tube|each)[^\n]*?\))\s*NDC:/i);
-    if (dm) drug = dm[1].trim();
-    return { ndc: ndc, drug: drug, location: loc };
+    if (!packageSize && scanned && scanned.pkgs > 0) packageSize = scanned.units / scanned.pkgs;
+    return {
+      ndc:productId, drug:drug, location:locations[0] || '', locations:locations,
+      ordered:ordered, received:received, scanned:scanned, pkgSize:packageSize,
+      unitWord:unitWord, warnings:warnings, key:productId
+    };
   }
 
   // ---- PO reading (condensed from readIncomingPurchaseOrders) ---------------
@@ -489,35 +554,65 @@
   submitReceivesButton.style.display = 'none';
   root.appendChild(submitReceivesButton);
   var submitReceivesBusy = false;
-  submitReceivesButton.addEventListener('click', function() {
-    if (submitReceivesBusy) return;
+  var lastAutoSubmittedQueue = '';
+  function queuedReceiveSignature() {
+    var tables = [].slice.call(document.querySelectorAll('table'));
+    for (var ti=0; ti<tables.length; ti++) {
+      var table=tables[ti];
+      if (table.closest && table.closest('#ptx7-rx-root')) continue;
+      if (!/Currently Scanned/i.test(table.innerText || '')) continue;
+      var headers=[].slice.call(table.querySelectorAll('thead th')).map(function(h){return String(h.innerText||'').replace(/[^a-z0-9]/gi,'').toLowerCase();});
+      var index=headers.findIndex(function(h){return h==='currentlyscanned';});
+      if(index<0) continue;
+      var rows=[].slice.call(table.querySelectorAll('tbody tr'));
+      for(var ri=0;ri<rows.length;ri++){
+        var cells=[].slice.call(rows[ri].querySelectorAll(':scope > td,:scope > th'));
+        var value=String((cells[index]&&cells[index].innerText)||'').trim();
+        var quantity=Number(((value.match(/[\d.]+/)||['0'])[0]));
+        if(quantity>0) return String(rows[ri].innerText||'').replace(/\s+/g,' ').trim();
+      }
+    }
+    return '';
+  }
+  function clickSubmitReceivesOnce(reason) {
+    if (submitReceivesBusy) return false;
     var pimsButton = document.querySelector('button[data-testid="submit-receives"]');
     if (!pimsButton || pimsButton.disabled || pimsButton.getAttribute('aria-disabled') === 'true') {
       setDebug('PIMS Submit Receives is unavailable — return to PIMS');
-      return;
+      return false;
     }
     submitReceivesBusy = true;
     submitReceivesButton.disabled = true;
     submitReceivesButton.textContent = 'SUBMITTING…';
+    setDebug('Submit Receives activated once (' + reason + '); waiting for PIMS');
     pimsButton.click();
-    // A click is never confirmation. Re-enable after PIMS has had time to show
-    // its location-required prompt or validation response.
+    // A click is never confirmation. PIMS dialog/quantities remain authoritative.
     setTimeout(function(){ submitReceivesBusy = false; }, 1800);
-  });
+    return true;
+  }
+  submitReceivesButton.addEventListener('click', function() { clickSubmitReceivesOnce('manual fallback'); });
   setInterval(function() {
     var receiving = root.style.display === 'block' && state.phase === 'RECEIVE';
     var detail = receiving ? currentReceiveDetail() : null;
     var pimsButton = receiving ? document.querySelector('button[data-testid="submit-receives"]') : null;
     submitReceivesButton.style.display = receiving ? 'block' : 'none';
-    if (!receiving) return;
+    if (!receiving) { lastAutoSubmittedQueue=''; return; }
     if (detail) {
       submitReceivesBusy = false;
       submitReceivesButton.disabled = true;
       submitReceivesButton.textContent = 'SCAN LOCATION TO COMPLETE';
-    } else {
-      submitReceivesButton.disabled = submitReceivesBusy || !pimsButton || pimsButton.disabled || pimsButton.getAttribute('aria-disabled') === 'true';
-      submitReceivesButton.textContent = submitReceivesBusy ? 'SUBMITTING…' : 'SUBMIT RECEIVES';
+      return;
     }
+    var queue = queuedReceiveSignature();
+    if (!queue) lastAutoSubmittedQueue = '';
+    var available = !!pimsButton && !pimsButton.disabled && pimsButton.getAttribute('aria-disabled') !== 'true';
+    if (queue && queue !== lastAutoSubmittedQueue && available && !submitReceivesBusy) {
+      lastAutoSubmittedQueue = queue;
+      clickSubmitReceivesOnce('PIMS Currently Scanned row');
+      return;
+    }
+    submitReceivesButton.disabled = submitReceivesBusy || !available;
+    submitReceivesButton.textContent = submitReceivesBusy ? 'SUBMITTING…' : 'SUBMIT RECEIVES';
   }, 350);
 
   // ---------------------------------------------------------------------------
@@ -545,6 +640,77 @@
     } catch (e) {}
   }
 
+
+  // Voice and settings are visual/accessibility helpers only. They do not
+  // participate in scanner capture or PIMS delivery.
+  var VOICE_ON_KEY = 'ptx7_rx_voice_on';
+  var VOICE_NAME_KEY = 'ptx7_rx_voice_name';
+  var VOICE_RATE_KEY = 'ptx7_rx_voice_rate';
+  var ORIENTATION_KEY = 'ptx7_rx_orientation';
+  function voiceEnabled(){ try{return localStorage.getItem(VOICE_ON_KEY)!=='false';}catch(e){return true;} }
+  function voiceRate(){ var value=1;try{value=Number(localStorage.getItem(VOICE_RATE_KEY)||1);}catch(e){}return [0.85,1,1.15,1.3].indexOf(value)>=0?value:1; }
+  function voices(){ return window.speechSynthesis ? window.speechSynthesis.getVoices().filter(function(v){return /^en[-_]/i.test(v.lang||'');}) : []; }
+  function selectedVoice(){ var all=voices(),saved='';try{saved=localStorage.getItem(VOICE_NAME_KEY)||'';}catch(e){}return all.find(function(v){return v.voiceURI===saved||v.name===saved;})||all[0]||null; }
+  function spokenLocation(location){
+    var value=String(location||'').toUpperCase();
+    var match=value.match(/^(?:MAN(?:FW|WS)?|CLD[A-Z]*)0*(\d{3})-([A-Z])-(\d{1,2})$/);
+    if(!match)return value.replace(/-/g,', ');
+    return match[1].split('').join(' ')+', '+match[2]+', '+Number(match[3]);
+  }
+  function speakLocations(locations,force){
+    try{
+      if(!window.speechSynthesis||(!force&&!voiceEnabled()))return;
+      var list=(locations||[]).filter(Boolean);if(!list.length)return;
+      window.speechSynthesis.cancel();
+      var text=list.length===1?spokenLocation(list[0]):'Multiple valid locations. '+list.map(spokenLocation).join('. ');
+      var utterance=new SpeechSynthesisUtterance(text);utterance.rate=voiceRate();var voice=selectedVoice();if(voice)utterance.voice=voice;
+      window.speechSynthesis.speak(utterance);
+    }catch(e){}
+  }
+  var lastSpokenLocations='';
+  setInterval(function(){
+    if(root.style.display!=='block'||state.phase!=='RECEIVE')return;
+    var detail=currentReceiveDetail();var key=detail&&detail.locations?detail.ndc+'|'+detail.locations.join('|'):'';
+    if(key&&key!==lastSpokenLocations){lastSpokenLocations=key;speakLocations(detail.locations,false);}
+    if(!detail)lastSpokenLocations='';
+  },500);
+
+  var settings=document.createElement('section');
+  settings.id='ptx7-rx-settings';
+  settings.style.cssText='position:fixed;inset:72px 0 0;z-index:20;display:none;background:#fff;padding:22px;overflow:auto;font:900 21px Arial;color:#172b3a';
+  settings.innerHTML='<h2 style="font-size:38px;margin:0 0 18px">TOOLS / SETTINGS</h2>'+
+    '<label style="display:block;margin:14px 0">LOCATION VOICE <select id="ptx7-voice-on" style="width:100%;height:58px;font-size:20px"><option value="on">ON</option><option value="off">MUTED</option></select></label>'+
+    '<label style="display:block;margin:14px 0">VOICE <select id="ptx7-voice-name" style="width:100%;height:58px;font-size:20px"></select></label>'+
+    '<label style="display:block;margin:14px 0">SPEED <select id="ptx7-voice-rate" style="width:100%;height:58px;font-size:20px"><option value="0.85">0.85×</option><option value="1">1.00×</option><option value="1.15">1.15×</option><option value="1.3">1.30×</option></select></label>'+
+    '<label style="display:block;margin:14px 0">ORIENTATION <select id="ptx7-orientation" style="width:100%;height:58px;font-size:20px"><option value="AUTO">AUTO ROTATE</option><option value="PORTRAIT">LOCK PORTRAIT</option><option value="LANDSCAPE">LOCK LANDSCAPE</option></select></label>'+
+    '<button id="ptx7-voice-preview" class="ptx7-rx-btn primary">🔊 PREVIEW LOCATION</button>'+
+    '<button id="ptx7-show-diag" class="ptx7-rx-btn ghost">SHOW DIAGNOSTIC</button>'+
+    '<textarea id="ptx7-settings-diag" readonly style="display:none;width:100%;height:240px;font:13px monospace"></textarea>'+
+    '<button id="ptx7-settings-done" class="ptx7-rx-btn primary">DONE</button>';
+  root.appendChild(settings);
+  function populateVoiceSettings(){
+    var select=settings.querySelector('#ptx7-voice-name'),saved='';try{saved=localStorage.getItem(VOICE_NAME_KEY)||'';}catch(e){}
+    select.replaceChildren(new Option('Automatic device voice',''));
+    voices().forEach(function(v){select.add(new Option(v.name+' ('+v.lang+')',v.voiceURI||v.name));});select.value=saved;
+  }
+  function openSettings(){
+    state.releaseFocus=true;
+    try{capture.blur();}catch(e){}
+    try{if(window.PTX7Host&&window.PTX7Host.setScanOwnership)window.PTX7Host.setScanOwnership(false);}catch(e){}
+    settings.querySelector('#ptx7-voice-on').value=voiceEnabled()?'on':'off';
+    settings.querySelector('#ptx7-voice-rate').value=String(voiceRate());
+    settings.querySelector('#ptx7-orientation').value=localStorage.getItem(ORIENTATION_KEY)||'AUTO';
+    populateVoiceSettings();settings.style.display='block';
+  }
+  settings.querySelector('#ptx7-voice-on').onchange=function(e){localStorage.setItem(VOICE_ON_KEY,e.target.value==='on'?'true':'false');if(e.target.value==='off'&&window.speechSynthesis)window.speechSynthesis.cancel();};
+  settings.querySelector('#ptx7-voice-name').onchange=function(e){localStorage.setItem(VOICE_NAME_KEY,e.target.value);};
+  settings.querySelector('#ptx7-voice-rate').onchange=function(e){localStorage.setItem(VOICE_RATE_KEY,e.target.value);};
+  settings.querySelector('#ptx7-orientation').onchange=function(e){localStorage.setItem(ORIENTATION_KEY,e.target.value);try{if(window.PTX7Host&&window.PTX7Host.setOrientationMode)window.PTX7Host.setOrientationMode(e.target.value);}catch(_){};};
+  settings.querySelector('#ptx7-voice-preview').onclick=function(){var d=currentReceiveDetail();speakLocations(d&&d.locations&&d.locations.length?d.locations:['MANFW0105-C-10'],true);};
+  settings.querySelector('#ptx7-show-diag').onclick=function(){var box=settings.querySelector('#ptx7-settings-diag');box.value=buildDiagnostic();box.style.display='block';};
+  settings.querySelector('#ptx7-settings-done').onclick=function(){settings.style.display='none';state.releaseFocus=false;render();setTimeout(focusCapture,20);};
+  document.getElementById('ptx7-rx-gear').onclick=openSettings;
+  if(window.speechSynthesis&&window.speechSynthesis.addEventListener)window.speechSynthesis.addEventListener('voiceschanged',function(){if(settings.style.display==='block')populateVoiceSettings();});
 
   // Hide the step-dots row; this flow is a continuous scan loop, not 4 steps.
   dots.style.display = 'none';
@@ -599,13 +765,38 @@
       h += '<div class="ptx7-rx-step">' + (po ? 'PO ' + esc(po) : 'RECEIVING') + '</div>';
 
       if (detail) {
-        // An item was scanned; PIMS is waiting for the location to submit.
-        h += '<div class="ptx7-rx-head">Scan the location</div>';
-        h += '<div class="ptx7-rx-success"><div class="loc">' +
-          esc(detail.location || 'SEE PIMS') + '</div>' +
-          '<div class="drug">' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</div></div>';
+        // Active PIMS dialog is authoritative. Bind identity, quantities, and
+        // all locations from the same current product snapshot.
+        var ordered = detail.ordered, received = detail.received, scanned = detail.scanned;
+        var pendingPkgs = scanned ? scanned.pkgs : 0;
+        var pendingUnits = scanned ? scanned.units : 0;
+        var confirmedPkgs = received ? Math.max(0, received.pkgs - pendingPkgs) : 0;
+        var confirmedUnits = received ? Math.max(0, received.units - pendingUnits) : 0;
+        h += '<div class="ptx7-rx-head">Scan location to complete receive</div>';
+        h += '<div class="ptx7-rx-confirm ok"><strong>' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</strong>' +
+          '<span class="meta">NDC ' + esc(detail.ndc) + (detail.pkgSize ? ' · Package size ' + esc(detail.pkgSize) + ' ' + esc(detail.unitWord) : '') + '</span>';
+        if (scanned && ordered) {
+          h += '<div style="font-size:38px;margin-top:12px">' + esc(scanned.pkgs) + ' of ' + esc(ordered.pkgs) + ' bottles scanned</div>' +
+            '<span class="meta" style="font-size:26px">' + esc(scanned.units) + ' of ' + esc(ordered.units) + ' ' + esc(detail.unitWord) + '</span>' +
+            '<span class="meta">' + esc(confirmedPkgs) + ' confirmed · ' + esc(pendingPkgs) + ' pending (' + esc(confirmedUnits) + ' confirmed · ' + esc(pendingUnits) + ' pending)</span>';
+        } else if (scanned) {
+          h += '<div style="font-size:38px;margin-top:12px">' + esc(scanned.pkgs) + ' bottle' + (scanned.pkgs === 1 ? '' : 's') + ' scanned</div>' +
+            '<span class="meta">Expected quantity unavailable</span>';
+        } else {
+          h += '<span class="meta">Pending quantity loading from PIMS</span>';
+        }
+        h += '</div>';
+        if (detail.warnings && detail.warnings.length) h += '<div class="ptx7-rx-confirm bad">⚠ ' + esc(detail.warnings.join(' · ')) + '</div>';
+        if (detail.locations && detail.locations.length) {
+          h += '<div class="ptx7-rx-sub" style="font-weight:900">Suggested locations</div>';
+          detail.locations.forEach(function(location){
+            h += '<div class="ptx7-rx-success" style="margin:12px 0"><div class="loc">' + esc(location) + '</div></div>';
+          });
+        } else {
+          h += '<div class="ptx7-rx-confirm bad">Suggested locations unavailable — View PIMS</div>';
+        }
         h += scanBox('SCAN LOCATION');
-        h += '<div class="ptx7-rx-sub">Scan the location to submit this receive.</div>';
+        h += '<div class="ptx7-rx-sub">Pending location confirmation. Receipt is not confirmed yet.</div>';
       } else {
         // Ready for the next item. Show a big "begin / progress" prompt.
         h += '<div class="ptx7-rx-head">Begin receiving inventory</div>';
@@ -632,19 +823,6 @@
     if (exit) exit.onclick = function () { window.__ptx7Rx.close(); };
     var rescan = document.getElementById('ptx7-rx-rescan');
     if (rescan) rescan.onclick = function () { startNdcPhase(); };
-    var tf = document.getElementById('ptx7-rx-togglefocus');
-    if (tf) tf.onclick = function () {
-      state.releaseFocus = !state.releaseFocus;
-      if (state.releaseFocus) { try { capture.blur(); } catch (e) {} }
-      render();
-    };
-    var diag = document.getElementById('ptx7-rx-diag');
-    if (diag) diag.onclick = function () {
-      var box = document.getElementById('ptx7-rx-diagbox');
-      if (!box) return;
-      box.innerHTML = '<textarea readonly style="width:100%;height:260px;font:12px monospace;' +
-        'border:2px solid #cdd5db;border-radius:10px;padding:8px">' + esc(buildDiagnostic()) + '</textarea>';
-    };
     [].slice.call(body.querySelectorAll('[data-po]')).forEach(function (btn) {
       btn.onclick = function () {
         var p = state.pos[Number(btn.getAttribute('data-po'))];

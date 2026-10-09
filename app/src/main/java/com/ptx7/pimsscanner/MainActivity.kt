@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 1001
         private const val TAG = "PTX7Scanner"
+        private const val ORIENTATION_PREF = "ptx7_orientation_mode"
 
         /*
          * The integrated camera scanner is tabled in favor of the device's
@@ -135,6 +137,7 @@ class MainActivity : ComponentActivity() {
          * The status bar itself belongs to Android and cannot
          * receive taps for our scanner toggle.
          */
+        applySavedOrientation()
         window.statusBarColor =
             android.graphics.Color.parseColor("#007A83")
 
@@ -2840,6 +2843,16 @@ class MainActivity : ComponentActivity() {
     private var lastScanKeyAt = 0L
     private var receivingBridgeRegistered = false
 
+    private fun applySavedOrientation() {
+        val mode = getSharedPreferences("ptx7_pims", Context.MODE_PRIVATE)
+            .getString(ORIENTATION_PREF, "AUTO") ?: "AUTO"
+        requestedOrientation = when (mode) {
+            "PORTRAIT" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            "LANDSCAPE" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     private fun registerReceivingBridge() {
         if (receivingBridgeRegistered) return
         webView.addJavascriptInterface(object {
@@ -2857,6 +2870,13 @@ class MainActivity : ComponentActivity() {
             @android.webkit.JavascriptInterface
             fun setScanOwnership(owns: Boolean) {
                 runOnUiThread { assistantOwnsScanNative = owns }
+            }
+            @android.webkit.JavascriptInterface
+            fun setOrientationMode(mode: String) {
+                val normalized = mode.uppercase().takeIf { it in setOf("AUTO", "PORTRAIT", "LANDSCAPE") } ?: "AUTO"
+                getSharedPreferences("ptx7_pims", Context.MODE_PRIVATE).edit()
+                    .putString(ORIENTATION_PREF, normalized).apply()
+                runOnUiThread { applySavedOrientation() }
             }
         }, "PTX7Host")
         receivingBridgeRegistered = true

@@ -150,7 +150,9 @@
 
                 android:layout_height="88dp"
 
-                android:background="#111111" />
+                android:background="#111111"
+
+            android:visibility="gone"/>
 
 
 
@@ -170,7 +172,7 @@
 
                 android:textSize="9sp"
 
-                android:text="https://console.inventory.pharmacy.amazon.dev" />
+                android:text="https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7" />
 
 
 
@@ -243,7 +245,9 @@
 
                     android:text="HIDE CAMERA"
 
-                    android:textSize="8sp" />
+                    android:textSize="8sp"
+
+            android:visibility="gone"/>
 
             </LinearLayout>
 
@@ -593,7 +597,7 @@
 
             android:alpha="0.96"
 
-            android:visibility="visible" />
+            android:visibility="gone" />
 
 
         <!-- Large fixed workflow navigation. -->
