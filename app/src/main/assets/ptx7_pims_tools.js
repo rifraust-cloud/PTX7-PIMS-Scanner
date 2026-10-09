@@ -4,6 +4,9 @@
   window.__ptx7PimsToolsInstalled = true;
 
   var INVENTORY_URL = 'https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7';
+  var LOCATIONS_URL = 'https://console.inventory.pharmacy.amazon.dev/locations?facility=PTX7';
+  var LOCATION_CODE = /\b[A-Z]{2,}[A-Z0-9]*\d{2,}(?:-[A-Z0-9]+)+\b/g;
+  var GOTO_KEY = 'ptx7_goto_location';
   var inventorySimple = true;
   var locationsSimple = true;
   var lastSubmitted = '';
@@ -36,7 +39,7 @@
     return css.display !== 'none' && css.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   }
   function isToolElement(element) {
-    return !!(element && element.closest && element.closest('#ptx7-inventory-root,#ptx7-location-root,#ptx7-full-view-toggle,#ptx7-route-message,#ptx7-receive-current-po,#ptx7-rx-root'));
+    return !!(element && element.closest && element.closest('#ptx7-remove-confirm,#ptx7-inventory-root,#ptx7-location-root,#ptx7-full-view-toggle,#ptx7-route-message,#ptx7-receive-current-po,#ptx7-rx-root'));
   }
   function nativeElements(selector) {
     return [].slice.call(document.querySelectorAll(selector)).filter(function (element) { return !isToolElement(element); });
@@ -87,6 +90,16 @@
     '#ptx7-location-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:22px 0}' +
     '#ptx7-location-actions button{min-height:90px;border:0;border-radius:15px;background:#075f67;color:#fff;font-size:29px;font-weight:900;padding:16px}' +
     '#ptx7-location-results .ptx7-table{font-size:28px}' +
+    '#ptx7-inventory-input:focus,#ptx7-location-input:focus{outline:none;border-color:#f0a000;box-shadow:0 0 0 8px #f0a00066;animation:ptx7pulse 1.4s ease-in-out infinite}' +
+    '@keyframes ptx7pulse{0%,100%{box-shadow:0 0 0 6px #f0a00055}50%{box-shadow:0 0 0 14px #f0a00022}}' +
+    '.ptx7-scan-label{grid-column:1/-1;font:900 40px Arial;color:#005a61;text-align:center;letter-spacing:1px}' +
+    '.ptx7-remove-btn{min-height:76px;min-width:170px;border:0;border-radius:14px;background:#b42318;color:#fff;font:900 28px Arial;padding:10px 16px}' +
+    '#ptx7-remove-confirm{position:fixed;inset:0;z-index:2147483646;display:none;align-items:center;justify-content:center;background:#0008}' +
+    '#ptx7-remove-confirm .box{width:86%;background:#fff;border:7px solid #b42318;border-radius:24px;padding:34px;font:30px Arial;color:#172b3a}' +
+    '#ptx7-remove-confirm h2{font:900 52px Arial;color:#b42318;margin:0 0 18px;text-align:center}' +
+    '#ptx7-remove-confirm .row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:28px}' +
+    '#ptx7-remove-confirm button{min-height:110px;border:0;border-radius:18px;font:900 40px Arial}' +
+    '.ptx7-loc-link{display:inline-block;margin:6px 8px 6px 0;min-height:70px;border:4px solid #007a83;border-radius:14px;background:#fff;color:#007a83;font:900 30px Arial;padding:10px 18px;text-decoration:underline}' +
     '.ptx7-type-btn{grid-column:1/-1;min-height:80px;border:4px solid #007a83;border-radius:15px;background:#fff;color:#007a83;font-size:30px;font-weight:900}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
     '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
@@ -118,6 +131,7 @@
     '<header id="ptx7-inventory-head">INVENTORY</header>' +
     '<main id="ptx7-inventory-content">' +
       '<div id="ptx7-inventory-search">' +
+        '<div class="ptx7-scan-label">SCAN MEDICATION BARCODE</div>' +
         '<input id="ptx7-inventory-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan medication barcode" aria-label="Inventory NDC search">' +
         '<button id="ptx7-inventory-submit" type="button">SEARCH</button>' +
         '<button id="ptx7-inventory-type" class="ptx7-type-btn" type="button">\u2328 TYPE NDC-11</button>' +
@@ -144,6 +158,7 @@
     '<header id="ptx7-location-head">LOCATIONS</header>' +
     '<main id="ptx7-location-content">' +
       '<div id="ptx7-location-search">' +
+        '<div class="ptx7-scan-label">SCAN LOCATION BARCODE</div>' +
         '<input id="ptx7-location-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan a stock location" aria-label="Stock location search">' +
         '<button id="ptx7-location-submit" type="button">SEARCH</button>' +
         '<button id="ptx7-location-type" class="ptx7-type-btn" type="button">\u2328 TYPE LOCATION</button>' +
@@ -218,6 +233,34 @@
     input.dispatchEvent(new Event('change', {bubbles:true}));
   }
 
+  var retryTimer = null;
+  function queueRetry(kind, value, scannerInput) {
+    clearTimeout(retryTimer);
+    var target = kind === 'inventory' ? results : locationResults;
+    target.innerHTML = '<div class="ptx7-card"><strong>Waiting for PIMS… ' + esc(value) + ' will search automatically.</strong></div>';
+    var started = Date.now();
+    (function attempt() {
+      retryTimer = setTimeout(function () {
+        var ok = kind === 'inventory' ? submitInventorySearchNow(value, scannerInput) : submitLocationSearchNow(value, scannerInput);
+        if (ok) return;
+        if (Date.now() - started < 8000) attempt();
+        else showMessage('PIMS did not load in time. Scan again.', kind === 'inventory');
+      }, 250);
+    })();
+  }
+  function submitInventorySearchNow(value, scannerInput) {
+    var input = nativeInventoryField(), submit = nearbySubmit(input);
+    if (!input || !submit || submit.disabled || submit.getAttribute('aria-disabled') === 'true') return false;
+    inventorySearchBusy = false;
+    return submitInventorySearch(value, scannerInput) !== false;
+  }
+  function submitLocationSearchNow(value, scannerInput) {
+    var input = locationScanField(), submit = nearbySubmit(input);
+    if (!input || !submit || submit.disabled || submit.getAttribute('aria-disabled') === 'true') return false;
+    locationSearchBusy = false;
+    return submitLocationSearch(value, scannerInput) !== false;
+  }
+
   function submitInventorySearch(raw, scannerInput) {
     if (inventorySearchBusy) return false;
     var typed = String(raw == null ? '' : raw).trim();
@@ -236,7 +279,8 @@
     var input = nativeInventoryField();
     var submit = nearbySubmit(input);
     if (!input || !submit || submit.disabled || submit.getAttribute('aria-disabled') === 'true') {
-      showMessage('PIMS Inventory search is not ready. Wait a moment and try again.', true);
+      // PIMS is still rendering (common on the first scan). Hold the scan and retry.
+      queueRetry('inventory', searchValue, scannerInput);
       return false;
     }
     inventorySearchBusy = true;
@@ -300,7 +344,7 @@
     if (value.length<4) { showMessage('Scan or enter a complete stock location.', false); return false; }
     var input=locationScanField(),submit=nearbySubmit(input);
     if(!input||!submit||submit.disabled||submit.getAttribute('aria-disabled')==='true'){
-      showMessage('PIMS Location search is not ready. Use Full Location Management if needed.', false);return false;
+      queueRetry('locations', value, scannerInput);return false;
     }
     locationSearchBusy=true;setNativeValue(input,value);lastSubmitted=value;lastSubmittedAt=Date.now();lastLocationSignature='';
     locationResults.innerHTML='<div class="ptx7-card"><strong>Loading location '+esc(value)+'…</strong></div>';
@@ -346,7 +390,15 @@
       if (!cells.length) return;
       html += '<tr>' + cells.map(function (cell) {
         var text = normalize(cell.innerText);
-        var link = linkMode && cell.querySelector('a[href],button,[role="button"]');
+        if (linkMode === 'locations') {
+          var codes = String(cell.innerText || '').toUpperCase().match(LOCATION_CODE);
+          if (codes && codes.length) {
+            return '<td>' + codes.map(function (code) {
+              return '<button type="button" class="ptx7-loc-link" data-goto-location="' + esc(code) + '">' + esc(code) + ' \u203a</button>';
+            }).join('') + '</td>';
+          }
+        }
+        var link = linkMode === true && cell.querySelector('a[href],button,[role="button"]');
         if (link) {
           var action = {href: link.getAttribute && link.getAttribute('href'), element: link};
           var actionIndex = poActions.push(action) - 1;
@@ -381,6 +433,44 @@
     setTimeout(function(){lastRenderSignature='';renderInventory();},500);
   }
 
+  var removeActions=[], pendingRemove=null;
+  function nativeRemoveButton(row){
+    var buttons=[].slice.call(row.querySelectorAll('button,[role="button"]')).filter(function(b){return !isToolElement(b);});
+    if(!buttons.length)return null;
+    var labeled=buttons.find(function(b){return /remove|delete|disassociate|minus/i.test(normalize(b.innerText||b.getAttribute('aria-label')||b.getAttribute('title')||b.getAttribute('data-testid')));});
+    return labeled||(buttons.length===1?buttons[0]:null);
+  }
+  var removeConfirm=document.createElement('div');
+  removeConfirm.id='ptx7-remove-confirm';
+  removeConfirm.innerHTML='<div class="box"><h2>REMOVE?</h2><div id="ptx7-remove-text" style="white-space:pre-wrap;line-height:1.45"></div>'+
+    '<div class="row"><button type="button" id="ptx7-remove-cancel" style="background:#e5e9ec;color:#172b3a">CANCEL</button>'+
+    '<button type="button" id="ptx7-remove-yes" style="background:#b42318;color:#fff">REMOVE</button></div></div>';
+  document.body.appendChild(removeConfirm);
+  function closeRemoveConfirm(){pendingRemove=null;removeConfirm.style.display='none';setTimeout(function(){try{locationInput.focus({preventScroll:true});}catch(_){}},50);}
+  removeConfirm.querySelector('#ptx7-remove-cancel').addEventListener('click',closeRemoveConfirm);
+  removeConfirm.querySelector('#ptx7-remove-yes').addEventListener('click',function(){
+    var action=pendingRemove;closeRemoveConfirm();
+    if(!action||!document.documentElement.contains(action.button)){showMessage('That product is no longer listed. Scan the location again.',false);return;}
+    // Confirmed here; let the original PIMS control run without a second prompt.
+    action.button.dataset.ptx7RemovalConfirmed='true';
+    action.button.click();
+    setTimeout(function(){delete action.button.dataset.ptx7RemovalConfirmed;},1000);
+    // If PIMS opens its own dialog, show it and return when it closes.
+    setTimeout(function(){
+      if(nativeElements('[role="dialog"],[aria-modal="true"]').some(visible)){
+        locationsSimple=false;nativeActionActive=true;nativeDialogSeen=true;nativeActionStartedAt=Date.now();
+        document.documentElement.classList.add('ptx7-native-action');locationRoot.style.display='none';
+      }else{lastLocationSignature='';scheduleLocationRender(400);}
+    },350);
+  });
+  locationResults.addEventListener('click',function(event){
+    var b=event.target.closest&&event.target.closest('[data-remove-action]');if(!b)return;
+    var action=removeActions[Number(b.getAttribute('data-remove-action'))];if(!action)return;
+    pendingRemove=action;
+    removeConfirm.querySelector('#ptx7-remove-text').textContent='Product ID: '+action.details.productId+'\nProduct: '+action.details.productName+'\nQuantity: '+action.details.quantity+'\n\nRemove this product from the current location?';
+    removeConfirm.style.display='flex';
+  });
+
   function renderLocation() {
     if(currentMode()!=='locations'||!locationsSimple)return;
     var text=nativeBodyText();
@@ -394,6 +484,17 @@
     var html='<section class="ptx7-card"><h2>LOCATION DETAILS</h2><div class="ptx7-product">'+esc(code||headings[0]||'Stock location')+'</div>';
     if(details.length)html+='<div class="ptx7-native-copy">'+esc(details.join('\n\n'))+'</div>';html+='</section>';
     grids.forEach(function(grid,index){html+='<section class="ptx7-card"><h2>'+(index===0?'PRODUCTS / OWNERS / QUANTITIES':'ADDITIONAL DETAILS')+'</h2>'+tableHtml(grid,false)+'</section>';});
+    // Products that PIMS allows removing from this location.
+    removeActions=[];
+    var removable=[];
+    grids.forEach(function(grid){
+      [].slice.call(grid.querySelectorAll('tbody tr,[role="row"]')).forEach(function(row){
+        var btn=nativeRemoveButton(row);if(!btn)return;
+        var details=productRemovalDetails(btn);if(!details)return;
+        removable.push('<tr><td>'+esc(details.productId)+'</td><td>'+esc(details.productName)+'</td><td>'+esc(details.quantity)+'</td><td><button type="button" class="ptx7-remove-btn" data-remove-action="'+(removeActions.push({button:btn,details:details})-1)+'">REMOVE</button></td></tr>');
+      });
+    });
+    if(removable.length)html+='<section class="ptx7-card"><h2>REMOVE PRODUCT FROM LOCATION</h2><div class="ptx7-table-wrap"><table class="ptx7-table"><thead><tr><th>Product ID</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>'+removable.join('')+'</tbody></table></div></section>';
     locationResults.innerHTML=html;
   }
   function scheduleLocationRender(delay){clearTimeout(locationRenderTimer);locationRenderTimer=setTimeout(renderLocation,delay||100);}
@@ -434,7 +535,7 @@
       '<div style="margin-top:13px;font-weight:800">Related products: ' + esc(relatedMatch ? relatedMatch[1] : 'Not returned') + '</div></section>';
     var html = '';
     if (selection === 'overview' || selection === 'all') html += overview;
-    if (selection === 'locations' || selection === 'all') html += '<section class="ptx7-card"><h2>LOCATIONS</h2>' + tableHtml(locationsTable, false) + '</section>';
+    if (selection === 'locations' || selection === 'all') html += '<section class="ptx7-card"><h2>LOCATIONS <span style="font-size:26px;font-weight:700">(tap to manage)</span></h2>' + tableHtml(locationsTable, 'locations') + '</section>';
     if (selection === 'incoming' || selection === 'all') html += '<section class="ptx7-card"><h2>INCOMING POs</h2>' + tableHtml(incomingTable, true) + '</section>';
     if (selection === 'transactions' || selection === 'all') {
       var transactionContent = transactionTable ? tableHtml(transactionTable, false) :
@@ -450,6 +551,14 @@
   }
   detailSelect.addEventListener('change', function () { transactionWakeRequested=false; lastRenderSignature = ''; renderInventory(); });
   results.addEventListener('click', function (event) {
+    var locLink = event.target.closest && event.target.closest('[data-goto-location]');
+    if (locLink) {
+      var code = locLink.getAttribute('data-goto-location');
+      try { sessionStorage.setItem(GOTO_KEY, JSON.stringify({code: code, at: Date.now()})); } catch (_) {}
+      locLink.textContent = 'OPENING ' + code + '\u2026';
+      location.href = LOCATIONS_URL;
+      return;
+    }
     var button = event.target.closest && event.target.closest('[data-po-action]');
     if (!button) return;
     var action = poActions[Number(button.getAttribute('data-po-action'))];
@@ -629,6 +738,7 @@
     if (!document.documentElement.contains(fullButton)) document.body.appendChild(fullButton);
     if (!document.documentElement.contains(receivePoButton)) document.body.appendChild(receivePoButton);
     if (!document.documentElement.contains(message)) document.body.appendChild(message);
+    if (!document.documentElement.contains(removeConfirm)) document.body.appendChild(removeConfirm);
   }
 
   new MutationObserver(function (mutations) {
@@ -640,6 +750,15 @@
   }).observe(document.documentElement, {subtree:true, childList:true});
   maintain();
   setInterval(function(){ if (!document.hidden) maintain(); }, 1500);
+  // Location selected from Inventory: search it as soon as Locations is ready.
+  try {
+    var pendingGoto = JSON.parse(sessionStorage.getItem(GOTO_KEY) || 'null');
+    sessionStorage.removeItem(GOTO_KEY);
+    if (pendingGoto && pendingGoto.code && Date.now() - Number(pendingGoto.at || 0) < 60000 && currentMode() === 'locations') {
+      locationsSimple = true;
+      submitLocationSearch(pendingGoto.code, true);
+    }
+  } catch (_) {}
   function enableTyping(input, mode) {
     input.setAttribute('inputmode', mode);
     input.value = '';

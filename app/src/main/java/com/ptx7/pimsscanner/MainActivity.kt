@@ -275,9 +275,9 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
 
-        findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openPoSearchOrReceive() }
-        inventoryModeButton.setOnClickListener { openPimsWorkflow(INVENTORY_URL) }
-        locationModeButton.setOnClickListener { openPimsWorkflow(LOCATIONS_URL) }
+        findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openPoSearchOrReceive(); focusWebView() }
+        inventoryModeButton.setOnClickListener { openPimsWorkflow(INVENTORY_URL); focusWebView() }
+        locationModeButton.setOnClickListener { openPimsWorkflow(LOCATIONS_URL); focusWebView() }
 
         scanNowButton.setOnClickListener {
 
@@ -993,6 +993,7 @@ class MainActivity : ComponentActivity() {
                                 injectPimsUiEnhancements()
                                 installReceivingMode()
                                 installPimsWorkflowTools()
+                                focusWebView()
 
                                 // PO Search always starts from PIMS Inventory,
                                 // after that destination has finished loading.
@@ -2818,6 +2819,17 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read asset $name", e)
             ""
+        }
+    }
+
+    /*
+     * Give the WebView Android input focus so the page's scan field receives
+     * scanner keystrokes immediately, without the user tapping the screen.
+     */
+    private fun focusWebView() {
+        webView.post {
+            webView.isFocusableInTouchMode = true
+            webView.requestFocus(View.FOCUS_DOWN)
         }
     }
 

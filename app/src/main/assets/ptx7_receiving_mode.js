@@ -654,7 +654,7 @@
   var SOUND_STYLE_KEY = 'ptx7_rx_sound_style';
   var SOUND_VOLUME_KEY = 'ptx7_rx_sound_volume';
   function soundStyle(){ try{return localStorage.getItem(SOUND_STYLE_KEY)||'gentle';}catch(e){return 'gentle';} }
-  function soundVolume(){ var value='low';try{value=localStorage.getItem(SOUND_VOLUME_KEY)||'low';}catch(e){}return {low:0.025,medium:0.05,high:0.09}[value]||0.025; }
+  function soundVolume(){ var value='low';try{value=localStorage.getItem(SOUND_VOLUME_KEY)||'low';}catch(e){}return {low:0.006,medium:0.014,high:0.03}[value]||0.006; }
   function tone(ok) {
     try {
       var style=soundStyle();if(style==='muted')return;
@@ -663,14 +663,14 @@
       audioCtx = audioCtx || new Ctx();
       if (audioCtx.state === 'suspended') audioCtx.resume();
       var gentle=style==='gentle';
-      var seq=gentle?(ok?[[560,0,0.11],[720,0.13,0.20]]:[[240,0,0.16],[190,0.18,0.26]]):(ok?[[980,0,0.08],[1280,0.10,0.16]]:[[300,0,0.18],[190,0.20,0.28]]);
+      var seq=gentle?(ok?[[520,0,0.09]]:[[260,0,0.14]]):(ok?[[780,0,0.07],[980,0.09,0.12]]:[[300,0,0.16],[220,0.18,0.24]]);
       var peak=soundVolume(),t0=audioCtx.currentTime+0.02;
       seq.forEach(function(n){
         var osc=audioCtx.createOscillator(),g=audioCtx.createGain();
         osc.type=gentle?'sine':(ok?'square':'sawtooth');
         osc.frequency.setValueAtTime(n[0],t0+n[1]);
         g.gain.setValueAtTime(0.0001,t0+n[1]);
-        g.gain.exponentialRampToValueAtTime(peak,t0+n[1]+0.025);
+        g.gain.exponentialRampToValueAtTime(peak,t0+n[1]+0.04);
         g.gain.exponentialRampToValueAtTime(0.0001,t0+n[1]+n[2]);
         osc.connect(g);g.connect(audioCtx.destination);osc.start(t0+n[1]);osc.stop(t0+n[1]+n[2]+0.03);
       });
