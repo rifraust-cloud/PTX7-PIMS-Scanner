@@ -54,17 +54,18 @@
   var style = document.createElement('style');
   style.id = 'ptx7-pims-tools-style';
   style.textContent =
-    'html.ptx7-simple-pims body{font-size:30px!important}' +
+    'html.ptx7-simple-pims body{font-size:30px!important;overflow-x:hidden!important}' +
+    'html.ptx7-simple-pims body>:not(#ptx7-inventory-root):not(#ptx7-full-view-toggle):not(#ptx7-route-message):not(#ptx7-receive-current-po):not(#ptx7-rx-root){zoom:2;width:50%!important;max-width:50%!important}' +
     'html.ptx7-simple-pims input,html.ptx7-simple-pims textarea,html.ptx7-simple-pims select{min-height:82px!important;font-size:32px!important;padding:16px!important}' +
     'html.ptx7-simple-pims button{min-height:78px!important;font-size:30px!important;padding:15px 22px!important}' +
     'html.ptx7-simple-pims table{font-size:28px!important;line-height:1.4!important}' +
     'html.ptx7-simple-pims th,html.ptx7-simple-pims td{padding:18px 14px!important}' +
     'html.ptx7-simple-pims h1{font-size:54px!important}html.ptx7-simple-pims h2{font-size:44px!important}' +
     'html.ptx7-simple-pims [role="dialog"]{font-size:30px!important;max-width:96vw!important}' +
-    '#ptx7-inventory-root{position:fixed;inset:0 0 84px 0;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow:auto}' +
+    '#ptx7-inventory-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;transform:scale(2);transform-origin:top left;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
     '#ptx7-inventory-root *{box-sizing:border-box}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
-    '#ptx7-inventory-content{padding:24px;max-width:none;width:100%;margin:0 auto}' +
+    '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
     '#ptx7-inventory-search{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:16px;background:#fff;padding:22px;border:5px solid #007a83;border-radius:20px;box-shadow:0 5px 18px #0003}' +
     '#ptx7-inventory-scan-icon{font:900 48px monospace;color:#007a83;text-align:center;letter-spacing:-5px}' +
     '#ptx7-inventory-input{width:100%;min-height:100px;border:5px solid #007a83;border-radius:15px;padding:16px 20px;font-size:38px;font-weight:800}' +
@@ -79,9 +80,9 @@
     '.ptx7-metrics{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}.ptx7-metric{background:#eef7f8;border:3px solid #9cc9cd;border-radius:15px;padding:20px;font-size:32px;font-weight:900}' +
     '.ptx7-table-wrap{overflow:auto}.ptx7-table{width:100%;border-collapse:collapse;font-size:28px}.ptx7-table th{background:#dce7ea;text-align:left}.ptx7-table th,.ptx7-table td{padding:18px 14px;border-bottom:3px solid #b8c6cc;vertical-align:top}' +
     '.ptx7-po-link{border:0;background:transparent;color:#007a83;text-decoration:underline;font:900 28px Arial;padding:4px;min-height:0}' +
-    '.ptx7-empty{color:#394b59;font-size:30px;font-style:italic}.ptx7-native-copy{white-space:pre-wrap;line-height:1.5;max-height:700px;overflow:auto;font-size:28px}' +
-    '#ptx7-full-view-toggle,#ptx7-receive-current-po{position:fixed;right:18px;bottom:100px;z-index:2147483645;display:none;min-height:90px;border:0;border-radius:15px;background:#075f67;color:#fff;font:900 30px Arial;padding:16px 22px;box-shadow:0 5px 18px #0005}' +
-    '#ptx7-receive-current-po{left:18px;right:18px;background:#007a83;font-size:38px;border:4px solid #fff}' +
+    '.ptx7-empty{color:#394b59;font-size:30px;font-style:italic;min-height:150px;display:flex;align-items:center;justify-content:center;text-align:center}.ptx7-native-copy{white-space:pre-wrap;line-height:1.5;max-height:700px;overflow:auto;font-size:28px}' +
+    '#ptx7-full-view-toggle,#ptx7-receive-current-po{position:fixed;right:24px;bottom:240px;z-index:2147483645;display:none;min-height:150px;border:0;border-radius:20px;background:#075f67;color:#fff;font:900 52px Arial;padding:24px 30px;box-shadow:0 7px 22px #0005}' +
+    '#ptx7-receive-current-po{left:24px;right:24px;background:#007a83;font-size:60px;border:6px solid #fff}' +
     '#ptx7-route-message{position:fixed;left:18px;right:18px;top:16px;z-index:2147483646;display:none;padding:20px;border:4px solid #f0a000;border-radius:14px;background:#fff4e5;color:#8a4b00;font:900 28px Arial;box-shadow:0 5px 18px #0004}' +
     '@media(max-width:900px){#ptx7-inventory-search{grid-template-columns:90px 1fr}#ptx7-inventory-submit{grid-column:1/-1;width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}';
   document.head.appendChild(style);
@@ -457,7 +458,7 @@
 
   function maintain() {
     var mode = currentMode();
-    var enlarged = mode === 'inventory' || (mode === 'locations' && locationsSimple);
+    var enlarged = mode === 'inventory' || mode === 'locations' || mode === 'po';
     document.documentElement.classList.toggle('ptx7-simple-pims', enlarged);
     inventoryRoot.style.display = mode === 'inventory' && inventorySimple ? 'flex' : 'none';
     receivePoButton.style.display = mode === 'po' ? 'block' : 'none';

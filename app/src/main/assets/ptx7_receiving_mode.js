@@ -470,7 +470,7 @@
     '.ptx7-rx-btn.ghost{background:#fff;color:#005A61;border:4px solid #cdd5db}' +
     '.ptx7-rx-btn.wait{background:#eceff2;color:#59636b;font-size:24px}' +
     '.ptx7-rx-btn .meta{display:block;font-size:18px;font-weight:800;margin-top:8px;opacity:.9}' +
-    '.ptx7-rx-po{background:#fff;color:#007A83;border:4px solid #007A83}' +
+    '.ptx7-rx-po{background:#fff;color:#007A83;border:6px solid #007A83;box-shadow:0 5px 14px #0002}' +
     '.ptx7-rx-confirm{border-radius:18px;padding:22px 16px;margin:18px 0;text-align:center;font-weight:900;font-size:26px}' +
     '.ptx7-rx-confirm.ok{background:#e6f6eb;border:3px solid #087f3f;color:#087f3f}' +
     '.ptx7-rx-confirm.bad{background:#fff1f0;border:3px solid #b42318;color:#b42318}' +
@@ -483,7 +483,7 @@
   // Visual-only handheld sizing overrides. Existing render/state/scanner
   // functions remain unchanged from confirmed working build #49.
   STYLE.textContent +=
-    '#ptx7-rx-root{overflow:auto;background:#fff;bottom:84px!important}' +
+    '#ptx7-rx-root{inset:0 auto auto 0!important;width:50%!important;height:50%!important;transform:scale(2);transform-origin:top left;overflow-y:auto;overflow-x:hidden;background:#fff}' +
     '#ptx7-rx-bar{min-height:112px;padding:16px 22px;position:sticky;top:0;z-index:4;border-bottom:6px solid #005a61}' +
     '#ptx7-rx-bar .title{font-size:54px}' +
     '#ptx7-rx-bar .back,#ptx7-rx-bar .gear{width:96px;height:84px;font-size:38px;padding:8px}' +
