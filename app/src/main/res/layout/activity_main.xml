@@ -45,31 +45,16 @@
 
 
 
-    <!-- ================================================== -->
-    <!-- PRIMARY APP HANDLE                                 -->
-    <!--                                                    -->
-    <!-- Entire teal area is clickable.                     -->
-    <!-- Large 60dp phone-friendly target.                  -->
-    <!-- ================================================== -->
-
+    <!-- Hidden compatibility handle; the workflow bar replaces PIMS Mobile. -->
     <Button
-
         android:id="@+id/scannerCollapseButton"
-
         android:layout_width="match_parent"
-
         android:layout_height="0dp"
-
         android:minWidth="0dp"
-
         android:minHeight="0dp"
-
         android:padding="0dp"
-
         android:text="PIMS MOBILE"
-
         android:visibility="gone" />
-
 
 
     <!-- Required by existing Kotlin code; no visible space. -->
@@ -611,53 +596,54 @@
             android:visibility="visible" />
 
 
-        <!-- ============================================== -->
-        <!-- RECEIVING MODE LAUNCHER                        -->
-        <!--                                                -->
-        <!-- Large, high-contrast entry point for the       -->
-        <!-- simplified scan NDC -> PO -> med -> location   -->
-        <!-- receiving flow. Uses the built-in scanner.     -->
-        <!-- ============================================== -->
+        <!-- Large fixed workflow navigation. -->
+        <LinearLayout
+            android:id="@+id/workflowBar"
+            android:layout_width="match_parent"
+            android:layout_height="84dp"
+            android:layout_gravity="bottom"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:padding="8dp"
+            android:background="#FFFFFF"
+            android:elevation="16dp">
 
-        <Button
+            <Button
+                android:id="@+id/receiveModeButton"
+                android:layout_width="0dp"
+                android:layout_height="68dp"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:backgroundTint="#007A83"
+                android:text="RECEIVING"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="18sp" />
 
-            android:id="@+id/receiveModeButton"
+            <Button
+                android:id="@+id/inventoryModeButton"
+                android:layout_width="0dp"
+                android:layout_height="68dp"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:backgroundTint="#007A83"
+                android:text="INVENTORY"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="18sp" />
 
-            android:layout_width="wrap_content"
-
-            android:layout_height="56dp"
-
-            android:layout_gravity="bottom|start"
-
-            android:layout_marginStart="18dp"
-
-            android:layout_marginBottom="20dp"
-
-            android:paddingStart="22dp"
-
-            android:paddingEnd="22dp"
-
-            android:minWidth="0dp"
-
-            android:minHeight="0dp"
-
-            android:backgroundTint="#007A83"
-
-            android:text="RECEIVE"
-
-            android:textColor="#FFFFFF"
-
-            android:textStyle="bold"
-
-            android:textSize="16sp"
-
-            android:elevation="14dp"
-
-            android:clickable="true"
-
-            android:focusable="true"
-
-            android:visibility="visible" />
+            <Button
+                android:id="@+id/locationModeButton"
+                android:layout_width="0dp"
+                android:layout_height="68dp"
+                android:layout_weight="1.35"
+                android:layout_margin="4dp"
+                android:backgroundTint="#007A83"
+                android:text="STOCK LOCATION MGR"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+        </LinearLayout>
 
 </FrameLayout>
 
