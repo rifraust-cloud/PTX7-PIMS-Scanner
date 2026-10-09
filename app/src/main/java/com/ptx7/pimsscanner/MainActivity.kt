@@ -276,7 +276,7 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
 
         findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openPoSearchOrReceive() }
-        inventoryModeButton.setOnClickListener { openInventoryWorkflow() }
+        inventoryModeButton.setOnClickListener { openPimsWorkflow(INVENTORY_URL) }
         locationModeButton.setOnClickListener { openPimsWorkflow(LOCATIONS_URL) }
 
         scanNowButton.setOnClickListener {
@@ -1000,7 +1000,7 @@ class MainActivity : ComponentActivity() {
                                     pendingReceivingSearch = false
                                     openReceivingMode()
                                 }
-                            }, 150)
+                            }, 500)
                         }
                     }
                 }
@@ -2821,29 +2821,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openInventoryWorkflow() {
-        val showExistingInventory = """
-            (function(){
-              if (window.__ptx7Rx && window.__ptx7Rx.isOpen && window.__ptx7Rx.isOpen()) window.__ptx7Rx.close();
-              if (/\/inventory\b/i.test(location.pathname) && window.__ptx7PimsTools && window.__ptx7PimsTools.showInventory) {
-                window.__ptx7PimsTools.showInventory();
-                return true;
-              }
-              return false;
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(showExistingInventory) { result ->
-            runOnUiThread {
-                if (result?.contains("true") == true) {
-                    receivingModeOpen = false
-                    assistantOwnsScanNative = true
-                    scanBuffer.setLength(0)
-                    statusText.text = "Inventory"
-                } else openPimsWorkflow(INVENTORY_URL)
-            }
-        }
-    }
-
     private fun startNewPoSearch() {
         pendingReceivingSearch = true
         openPimsWorkflow(INVENTORY_URL)
@@ -2853,20 +2830,17 @@ class MainActivity : ComponentActivity() {
         registerReceivingBridge()
         val receivingPageCheck = """
             (function(){
-              if (window.__ptx7Rx && window.__ptx7Rx.isReceivingPage && window.__ptx7Rx.isReceivingPage()) return 'receiving';
+              if (window.__ptx7Rx && window.__ptx7Rx.isReceivingPage) {
+                return window.__ptx7Rx.isReceivingPage();
+              }
               var text = String((document.body && document.body.innerText) || '');
-              if (/Receiving in progress|Manually Receive Item|Unreceived\s*\d+\s*\/\s*\d+|Back to all Purchase Orders|Scan Location to submit receives/i.test(text)) return 'receiving';
-              if (/\/inventory/i.test(location.pathname)) return 'inventory';
-              return 'other';
+              return /Receiving in progress|Manually Receive Item|Unreceived\s*\d+\s*\/\s*\d+|Back to all Purchase Orders|Scan Location to submit receives/i.test(text);
             })();
         """.trimIndent()
         webView.evaluateJavascript(receivingPageCheck) { result ->
             runOnUiThread {
-                when {
-                    result?.contains("receiving") == true -> openReceivingMode()
-                    result?.contains("inventory") == true -> openReceivingMode()
-                    else -> startNewPoSearch()
-                }
+                if (result?.contains("true") == true) openReceivingMode()
+                else startNewPoSearch()
             }
         }
     }
