@@ -499,7 +499,8 @@
     '.ptx7-rx-success .loc{font-size:64px;line-height:1.05}' +
     '.ptx7-rx-success .drug{font-size:27px;line-height:1.2}' +
     '.ptx7-rx-confirm{font-size:30px;padding:24px 18px}.ptx7-rx-confirm .meta{font-size:21px}' +
-    '#ptx7-rx-submit-fixed{position:fixed;right:18px;bottom:20px;z-index:8;min-width:42%;min-height:76px;border:0;border-radius:15px;background:#007a83;color:#fff;font:900 27px Arial;box-shadow:0 6px 18px #0005;padding:12px 18px}' +
+    '#ptx7-rx-submit-fixed{position:fixed;right:18px;bottom:100px;z-index:8;min-width:42%;min-height:76px;border:0;border-radius:15px;background:#007a83;color:#fff;font:900 27px Arial;box-shadow:0 6px 18px #0005;padding:12px 18px}' +
+    '#ptx7-rx-new-po{position:fixed;left:18px;bottom:100px;z-index:8;display:none;min-width:42%;min-height:76px;border:3px solid #007a83;border-radius:15px;background:#fff;color:#007a83;font:900 24px Arial;box-shadow:0 6px 18px #0003;padding:12px 18px}' +
     '#ptx7-rx-submit-fixed:disabled{background:#98a2b3;color:#e9edf1;box-shadow:none}' +
     '#ptx7-rx-foot{font-size:15px;min-height:38px}' +
     '@media(max-width:700px){#ptx7-rx-bar .title{font-size:30px}.ptx7-rx-head{font-size:37px}.ptx7-rx-success .loc{font-size:52px}.ptx7-rx-btn{font-size:26px}}';
@@ -554,6 +555,26 @@
   submitReceivesButton.textContent = 'SUBMIT RECEIVES';
   submitReceivesButton.style.display = 'none';
   root.appendChild(submitReceivesButton);
+
+  var newPoButton = document.createElement('button');
+  newPoButton.id = 'ptx7-rx-new-po';
+  newPoButton.type = 'button';
+  newPoButton.textContent = 'SEARCH NEW PO';
+  root.appendChild(newPoButton);
+  newPoButton.addEventListener('click', function () {
+    var unfinished = !!currentReceiveDetail() || !!queuedReceiveSignature() || submitReceivesBusy;
+    if (unfinished && !confirm('Current item is unfinished—leave anyway?\n\nUnsaved receiving data will be lost.')) return;
+    try { sessionStorage.removeItem('ptx7_rx_resume'); } catch (_) {}
+    try {
+      if (window.PTX7Host && window.PTX7Host.startNewPoSearch) {
+        window.PTX7Host.startNewPoSearch();
+        return;
+      }
+    } catch (_) {}
+    root.style.display = 'none';
+    location.href = INVENTORY_URL;
+  });
+
   var submitReceivesBusy = false;
   var lastAutoSubmittedQueue = '';
   function queuedReceiveSignature() {
@@ -594,6 +615,7 @@
   submitReceivesButton.addEventListener('click', function() { clickSubmitReceivesOnce('manual fallback'); });
   setInterval(function() {
     var receiving = root.style.display === 'block' && state.phase === 'RECEIVE';
+    newPoButton.style.display = receiving && onReceivingPage() ? 'block' : 'none';
     var detail = receiving ? currentReceiveDetail() : null;
     var pimsButton = receiving ? document.querySelector('button[data-testid="submit-receives"]') : null;
     submitReceivesButton.style.display = receiving ? 'block' : 'none';
@@ -1181,6 +1203,8 @@
       }
     },
     isOpen: function () { return root.style.display === 'block'; },
+    isReceivingPage: function () { return onReceivingPage(); },
+    normalizeNdc: function (raw) { return scanToNdc11(raw); },
     // Native host path: Android captured a full hardware-wedge scan and hands
     // it to us. Forward it into PIMS and mirror.
     onHostScan: function (scanned) {

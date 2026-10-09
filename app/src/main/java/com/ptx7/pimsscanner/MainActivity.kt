@@ -50,6 +50,8 @@ class MainActivity : ComponentActivity() {
         private const val CAMERA_PERMISSION_REQUEST = 1001
         private const val TAG = "PTX7Scanner"
         private const val ORIENTATION_PREF = "ptx7_orientation_mode"
+        private const val INVENTORY_URL = "https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7"
+        private const val LOCATIONS_URL = "https://console.inventory.pharmacy.amazon.dev/locations?facility=PTX7"
 
         /*
          * The integrated camera scanner is tabled in favor of the device's
@@ -261,18 +263,17 @@ class MainActivity : ComponentActivity() {
         )
 
         configureWebView()
+        // Register before the first page load so native PO and Search New PO
+        // controls can call the host even if Receiving has not been opened yet.
+        registerReceivingBridge()
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
         findViewById<Button>(R.id.sendToPageButton).setOnClickListener { sendLastScanToPage(submit = true) }
 
-        findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openReceivingMode() }
-        inventoryModeButton.setOnClickListener {
-            openPimsWorkflow("https://console.inventory.pharmacy.amazon.dev/inventory?facility=PTX7")
-        }
-        locationModeButton.setOnClickListener {
-            openPimsWorkflow("https://console.inventory.pharmacy.amazon.dev/locations?facility=PTX7")
-        }
+        findViewById<Button>(R.id.receiveModeButton).setOnClickListener { openPoSearchOrReceive() }
+        inventoryModeButton.setOnClickListener { openPimsWorkflow(INVENTORY_URL) }
+        locationModeButton.setOnClickListener { openPimsWorkflow(LOCATIONS_URL) }
 
         scanNowButton.setOnClickListener {
 
@@ -950,6 +951,12 @@ class MainActivity : ComponentActivity() {
                         installReceivingMode()
                         installPimsWorkflowTools()
 
+                        // PO Search always starts from PIMS Inventory, but only
+                        // after that destination has actually finished loading.
+                        if (pendingReceivingSearch && url?.contains("/inventory", ignoreCase = true) == true) {
+                            pendingReceivingSearch = false
+                            openReceivingMode()
+                        }
 
                     }, 500)
                 }
@@ -2759,6 +2766,7 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------
 
     private var receivingModeInstalled = false
+    private var pendingReceivingSearch = false
 
     private fun readAsset(name: String): String {
         return try {
@@ -2766,6 +2774,30 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read asset $name", e)
             ""
+        }
+    }
+
+    private fun startNewPoSearch() {
+        pendingReceivingSearch = true
+        openPimsWorkflow(INVENTORY_URL)
+    }
+
+    private fun openPoSearchOrReceive() {
+        registerReceivingBridge()
+        val receivingPageCheck = """
+            (function(){
+              if (window.__ptx7Rx && window.__ptx7Rx.isReceivingPage) {
+                return window.__ptx7Rx.isReceivingPage();
+              }
+              var text = String((document.body && document.body.innerText) || '');
+              return /Receiving in progress|Manually Receive Item|Unreceived\s*\d+\s*\/\s*\d+|Back to all Purchase Orders|Scan Location to submit receives/i.test(text);
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(receivingPageCheck) { result ->
+            runOnUiThread {
+                if (result?.contains("true") == true) openReceivingMode()
+                else startNewPoSearch()
+            }
         }
     }
 
@@ -2872,6 +2904,14 @@ class MainActivity : ComponentActivity() {
                     scanBuffer.setLength(0)
                     workflowBar.visibility = View.VISIBLE
                 }
+            }
+            @android.webkit.JavascriptInterface
+            fun startNewPoSearch() {
+                runOnUiThread { this@MainActivity.startNewPoSearch() }
+            }
+            @android.webkit.JavascriptInterface
+            fun openCurrentPoReceiving() {
+                runOnUiThread { openReceivingMode() }
             }
             // JS tells us whether it currently owns the scan (NDC phase=true;
             // PO/RECEIVE=false) so native key interception matches.
