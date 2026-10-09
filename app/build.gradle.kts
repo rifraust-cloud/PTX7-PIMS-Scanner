@@ -11,8 +11,8 @@ android {
         applicationId = "com.ptx7.pimsscanner"
         minSdk = 23
         targetSdk = 35
-        versionCode = 36
-        versionName = "2.0.0-beta.7"
+        versionCode = 37
+        versionName = "2.0.0-beta.8"
     }
 
     compileOptions {

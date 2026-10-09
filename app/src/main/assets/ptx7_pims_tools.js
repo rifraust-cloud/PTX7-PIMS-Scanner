@@ -64,7 +64,7 @@
     'html.ptx7-simple-pims th,html.ptx7-simple-pims td{padding:18px 14px!important}' +
     'html.ptx7-simple-pims h1{font-size:54px!important}html.ptx7-simple-pims h2{font-size:44px!important}' +
     'html.ptx7-simple-pims [role="dialog"]{font-size:30px!important;max-width:96vw!important}' +
-    '#ptx7-inventory-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;zoom:2;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
+    '#ptx7-inventory-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;transform:scale(2);transform-origin:top left;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
     '#ptx7-inventory-root *{box-sizing:border-box}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
     '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
@@ -524,12 +524,14 @@
     if (!document.documentElement.contains(message)) document.body.appendChild(message);
   }
 
-  new MutationObserver(function () {
+  new MutationObserver(function (mutations) {
+    var nativeChanged=mutations.some(function(mutation){return !isToolElement(mutation.target);});
+    if(!nativeChanged)return;
     clearTimeout(maintain.timer);
     maintain.timer = setTimeout(maintain, 120);
   }).observe(document.documentElement, {subtree:true, childList:true});
   maintain();
-  setInterval(maintain, 1000);
+  setInterval(maintain, 1500);
   window.__ptx7PimsTools = {showInventory:function () {
     inventorySimple = true;
     nativeActionActive = false;
