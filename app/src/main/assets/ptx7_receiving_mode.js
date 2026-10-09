@@ -483,7 +483,7 @@
   // Visual-only handheld sizing overrides. Existing render/state/scanner
   // functions remain unchanged from confirmed working build #49.
   STYLE.textContent +=
-    '#ptx7-rx-root{inset:0 auto auto 0!important;width:50%!important;height:50%!important;transform:scale(2);transform-origin:top left;overflow-y:auto;overflow-x:hidden;background:#fff}' +
+    '#ptx7-rx-root{inset:0 auto auto 0!important;width:50%!important;height:50%!important;zoom:2;overflow-y:auto;overflow-x:hidden;background:#fff}' +
     '#ptx7-rx-bar{min-height:112px;padding:16px 22px;position:sticky;top:0;z-index:4;border-bottom:6px solid #005a61}' +
     '#ptx7-rx-bar .title{font-size:54px}' +
     '#ptx7-rx-bar .back,#ptx7-rx-bar .gear{width:96px;height:84px;font-size:38px;padding:8px}' +

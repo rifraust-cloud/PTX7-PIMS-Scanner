@@ -15,6 +15,9 @@
   var renderTimer = null;
   var lastRenderSignature = '';
   var poActions = [];
+  var inventorySearchBusy = false;
+  var transactionWakeRequested = false;
+  var nativeActionActive = false;
 
   function normalize(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
   function esc(value) {
@@ -55,19 +58,17 @@
   style.id = 'ptx7-pims-tools-style';
   style.textContent =
     'html.ptx7-simple-pims body{font-size:30px!important;overflow-x:hidden!important}' +
-    'html.ptx7-simple-pims body>:not(#ptx7-inventory-root):not(#ptx7-full-view-toggle):not(#ptx7-route-message):not(#ptx7-receive-current-po):not(#ptx7-rx-root){zoom:2;width:50%!important;max-width:50%!important}' +
     'html.ptx7-simple-pims input,html.ptx7-simple-pims textarea,html.ptx7-simple-pims select{min-height:82px!important;font-size:32px!important;padding:16px!important}' +
     'html.ptx7-simple-pims button{min-height:78px!important;font-size:30px!important;padding:15px 22px!important}' +
     'html.ptx7-simple-pims table{font-size:28px!important;line-height:1.4!important}' +
     'html.ptx7-simple-pims th,html.ptx7-simple-pims td{padding:18px 14px!important}' +
     'html.ptx7-simple-pims h1{font-size:54px!important}html.ptx7-simple-pims h2{font-size:44px!important}' +
     'html.ptx7-simple-pims [role="dialog"]{font-size:30px!important;max-width:96vw!important}' +
-    '#ptx7-inventory-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;transform:scale(2);transform-origin:top left;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
+    '#ptx7-inventory-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;zoom:2;z-index:2147483000;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
     '#ptx7-inventory-root *{box-sizing:border-box}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
     '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
-    '#ptx7-inventory-search{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:16px;background:#fff;padding:22px;border:5px solid #007a83;border-radius:20px;box-shadow:0 5px 18px #0003}' +
-    '#ptx7-inventory-scan-icon{font:900 48px monospace;color:#007a83;text-align:center;letter-spacing:-5px}' +
+    '#ptx7-inventory-search{display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;background:#fff;padding:22px;border:5px solid #007a83;border-radius:20px;box-shadow:0 5px 18px #0003}' +
     '#ptx7-inventory-input{width:100%;min-height:100px;border:5px solid #007a83;border-radius:15px;padding:16px 20px;font-size:38px;font-weight:800}' +
     '#ptx7-inventory-submit{min-width:210px;min-height:100px;border:0;border-radius:15px;background:#007a83;color:#fff;font-size:34px;font-weight:900;padding:16px 24px}' +
     '#ptx7-inventory-hint{grid-column:1/-1;color:#394b59;font-weight:800;font-size:27px;line-height:1.35}' +
@@ -84,6 +85,8 @@
     '#ptx7-full-view-toggle,#ptx7-receive-current-po{position:fixed;right:24px;bottom:240px;z-index:2147483645;display:none;min-height:150px;border:0;border-radius:20px;background:#075f67;color:#fff;font:900 52px Arial;padding:24px 30px;box-shadow:0 7px 22px #0005}' +
     '#ptx7-receive-current-po{left:24px;right:24px;background:#007a83;font-size:60px;border:6px solid #fff}' +
     '#ptx7-route-message{position:fixed;left:18px;right:18px;top:16px;z-index:2147483646;display:none;padding:20px;border:4px solid #f0a000;border-radius:14px;background:#fff4e5;color:#8a4b00;font:900 28px Arial;box-shadow:0 5px 18px #0004}' +
+    'html.ptx7-native-action [role="dialog"],html.ptx7-native-action [aria-modal="true"]{position:fixed!important;inset:70px 70px 280px!important;width:auto!important;max-width:none!important;height:auto!important;max-height:none!important;overflow:auto!important;padding:42px!important;font-size:48px!important;border:7px solid #007a83!important;border-radius:24px!important;background:#fff!important;z-index:2147483000!important;box-sizing:border-box!important}' +
+    'html.ptx7-native-action [role="dialog"] input,html.ptx7-native-action [role="dialog"] select,html.ptx7-native-action [role="dialog"] button,html.ptx7-native-action [aria-modal="true"] input,html.ptx7-native-action [aria-modal="true"] select,html.ptx7-native-action [aria-modal="true"] button{min-height:96px!important;font-size:42px!important;padding:18px!important}' +
     '@media(max-width:900px){#ptx7-inventory-search{grid-template-columns:90px 1fr}#ptx7-inventory-submit{grid-column:1/-1;width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}';
   document.head.appendChild(style);
 
@@ -93,7 +96,6 @@
     '<header id="ptx7-inventory-head">INVENTORY</header>' +
     '<main id="ptx7-inventory-content">' +
       '<div id="ptx7-inventory-search">' +
-        '<div id="ptx7-inventory-scan-icon" aria-hidden="true">||| || |||</div>' +
         '<input id="ptx7-inventory-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan medication barcode or enter NDC-11" aria-label="Inventory NDC search">' +
         '<button id="ptx7-inventory-submit" type="button">SEARCH</button>' +
         '<div id="ptx7-inventory-hint">Hardware scans accept UPC, GTIN, GS1, or NDC. Manual entry requires an 11-digit NDC.</div>' +
@@ -172,7 +174,8 @@
   }
 
   function submitInventorySearch(raw, scannerInput) {
-    var typed = normalize(raw);
+    if (inventorySearchBusy) return false;
+    var typed = String(raw == null ? '' : raw).trim();
     // Hardware scanner payloads must reach PIMS exactly as emitted. PIMS
     // understands package UPC/GTIN/GS1 values such as 313811719109. Converting
     // that payload to a guessed NDC-11 can insert padding in the wrong segment.
@@ -191,15 +194,25 @@
       showMessage('PIMS Inventory search is not ready. Wait a moment and try again.', true);
       return false;
     }
+    inventorySearchBusy = true;
     inventoryInput.value = searchValue;
     setNativeValue(input, searchValue);
     lastSubmitted = searchValue;
     lastSubmittedAt = Date.now();
     lastRenderSignature = '';
+    transactionWakeRequested = false;
     results.innerHTML = '<div class="ptx7-card"><strong>Searching PIMS for ' + esc(searchValue) + '…</strong></div>';
     submit.click();
-    setTimeout(function () { try { inventoryInput.focus({preventScroll:true}); } catch (_) {} }, 80);
-    scheduleRender(250);
+    // Clear only our visible capture field after PIMS has received the value.
+    // The native PIMS field remains untouched so its validation stays authoritative.
+    setTimeout(function () {
+      inventoryInput.value = '';
+      inventoryFirstAt = 0;
+      inventoryEventCount = 0;
+      try { inventoryInput.focus({preventScroll:true}); } catch (_) {}
+    }, 100);
+    setTimeout(function () { inventorySearchBusy = false; }, 700);
+    scheduleRender(200);
     scheduleRender(800);
     scheduleRender(1600);
     return true;
@@ -240,23 +253,25 @@
     return nativeElements('h1,h2,h3,h4,[role="heading"]').map(function (element) { return normalize(element.innerText); }).filter(Boolean);
   }
   function findTable(requiredPatterns) {
-    return nativeElements('table').find(function (table) {
+    return nativeElements('table,[role="table"],[role="grid"]').find(function (table) {
       var text = normalize(table.innerText);
       return requiredPatterns.every(function (pattern) { return pattern.test(text); });
     }) || null;
   }
   function tableHtml(table, linkMode) {
     if (!table) return '<div class="ptx7-empty">No information returned by PIMS.</div>';
-    var headerCells = [].slice.call(table.querySelectorAll('thead th'));
+    var headerCells = [].slice.call(table.querySelectorAll('thead th,[role="columnheader"]'));
     if (!headerCells.length) headerCells = [].slice.call(table.querySelectorAll('tr:first-child th,tr:first-child td'));
     var headers = headerCells.map(function (cell) { return normalize(cell.innerText); });
-    var rows = [].slice.call(table.querySelectorAll('tbody tr'));
+    var rows = [].slice.call(table.querySelectorAll('tbody tr,[role="row"]')).filter(function (row) {
+      return !row.querySelector('[role="columnheader"]') && row.querySelector('td,th,[role="cell"],[role="gridcell"]');
+    });
     if (!rows.length) rows = [].slice.call(table.querySelectorAll('tr')).slice(headers.length ? 1 : 0);
     var html = '<div class="ptx7-table-wrap"><table class="ptx7-table">';
     if (headers.length) html += '<thead><tr>' + headers.map(function (header) { return '<th>' + esc(header) + '</th>'; }).join('') + '</tr></thead>';
     html += '<tbody>';
     rows.slice(0, 100).forEach(function (row) {
-      var cells = [].slice.call(row.querySelectorAll(':scope > td,:scope > th,[role="cell"],[role="gridcell"]'));
+      var cells = [].slice.call(row.querySelectorAll(':scope > td,:scope > th,:scope > [role="cell"],:scope > [role="gridcell"]'));
       if (!cells.length) return;
       html += '<tr>' + cells.map(function (cell) {
         var text = normalize(cell.innerText);
@@ -271,11 +286,27 @@
     });
     return html + '</tbody></table></div>';
   }
-  function sectionText(headingPattern) {
+  function sectionContainer(headingPattern) {
     var heading = nativeElements('h1,h2,h3,h4,[role="heading"]').find(function (element) { return headingPattern.test(normalize(element.innerText)); });
-    if (!heading) return '';
-    var section = heading.closest('section,article,[role="region"]') || heading.parentElement;
+    if (!heading) return null;
+    var node = heading.closest('section,article,[role="region"]') || heading.parentElement;
+    for (var i=0; node && i<6 && node !== document.body; i++, node=node.parentElement) {
+      var text=normalize(node.innerText);
+      if (/Date/i.test(text) && /Type|Quantity|Reason|User|Onhand/i.test(text)) return node;
+    }
+    return heading.parentElement;
+  }
+  function sectionText(headingPattern) {
+    var section=sectionContainer(headingPattern);
     return normalize(section && section.innerText);
+  }
+  function wakeTransactionHistory() {
+    if (transactionWakeRequested) return;
+    var section=sectionContainer(/Transaction History/i);
+    if (!section) return;
+    transactionWakeRequested=true;
+    try { section.scrollIntoView({block:'center'}); } catch (_) {}
+    setTimeout(function(){lastRenderSignature='';renderInventory();},500);
   }
 
   function renderInventory() {
@@ -290,11 +321,12 @@
     var onhandMatch = text.match(/Onhand Quantity:\s*([\d.,-]+)/i);
     var valueMatch = text.match(/\bValue:\s*(\$?[\d,.-]+)/i);
     var relatedMatch = text.match(/Related Dispensable Products\s*\((\d+)\)/i);
+    var selection = detailSelect.value;
+    if (selection === 'transactions' || selection === 'all') wakeTransactionHistory();
     var locationsTable = findTable([/Subarea/i, /Location/i, /Quantity/i]);
     var incomingTable = findTable([/PO Number/i, /Receiv/i]);
     var transactionTable = findTable([/Date/i, /Quantity/i, /Onhand After|Reason|User/i]);
     var transactionFallback = sectionText(/Transaction History/i);
-    var selection = detailSelect.value;
     var signature = [selection, product, ndc, onhandMatch && onhandMatch[1], valueMatch && valueMatch[1], relatedMatch && relatedMatch[1],
       locationsTable && normalize(locationsTable.innerText), incomingTable && normalize(incomingTable.innerText),
       transactionTable && normalize(transactionTable.innerText), transactionFallback].join('|');
@@ -327,7 +359,7 @@
     clearTimeout(renderTimer);
     renderTimer = setTimeout(renderInventory, delay || 100);
   }
-  detailSelect.addEventListener('change', function () { lastRenderSignature = ''; renderInventory(); });
+  detailSelect.addEventListener('change', function () { transactionWakeRequested=false; lastRenderSignature = ''; renderInventory(); });
   results.addEventListener('click', function (event) {
     var button = event.target.closest && event.target.closest('[data-po-action]');
     if (!button) return;
@@ -353,15 +385,14 @@
       return;
     }
     inventorySimple = false;
+    nativeActionActive = !!target;
+    document.documentElement.classList.toggle('ptx7-native-action', nativeActionActive);
     inventoryRoot.style.display = 'none';
     fullButton.textContent = 'RETURN TO SIMPLE INVENTORY';
     fullButton.style.display = 'block';
-    if (target) {
-      target.style.outline = '5px solid #ffb000';
-      target.style.outlineOffset = '4px';
-      target.scrollIntoView({behavior:'smooth', block:'center'});
-      try { target.focus({preventScroll:true}); } catch (_) {}
-    }
+    // This is the user's one tap, forwarded to the public native PIMS control.
+    // No React internals or private handlers are invoked.
+    if (target) setTimeout(function () { if (document.documentElement.contains(target)) target.click(); }, 0);
   }
   inventoryRoot.querySelector('#ptx7-show-full-inventory').addEventListener('click', function () { showNativeInventory(''); });
   [].slice.call(inventoryRoot.querySelectorAll('[data-native-control]')).forEach(function (button) {
@@ -432,6 +463,8 @@
     var mode = currentMode();
     if (mode === 'inventory') {
       inventorySimple = true;
+      nativeActionActive = false;
+      document.documentElement.classList.remove('ptx7-native-action');
       fullButton.style.display = 'none';
       inventoryRoot.style.display = 'flex';
       lastRenderSignature = '';
@@ -497,5 +530,12 @@
   }).observe(document.documentElement, {subtree:true, childList:true});
   maintain();
   setInterval(maintain, 1000);
-  window.__ptx7PimsTools = {showInventory:function () { inventorySimple = true; maintain(); }, inventoryUrl:INVENTORY_URL};
+  window.__ptx7PimsTools = {showInventory:function () {
+    inventorySimple = true;
+    nativeActionActive = false;
+    document.documentElement.classList.remove('ptx7-native-action');
+    fullButton.style.display='none';
+    maintain();
+    setTimeout(function(){try{inventoryInput.focus({preventScroll:true});}catch(_){}},0);
+  }, inventoryUrl:INVENTORY_URL};
 })();
