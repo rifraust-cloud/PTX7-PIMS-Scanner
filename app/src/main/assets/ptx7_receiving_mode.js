@@ -503,6 +503,15 @@
     '#ptx7-rx-new-po{position:fixed;left:24px;bottom:108px;z-index:8;display:none;min-width:42%;min-height:112px;border:5px solid #007a83;border-radius:18px;background:#fff;color:#007a83;font:900 36px Arial;box-shadow:0 6px 18px #0003;padding:16px 22px}' +
     '#ptx7-rx-submit-fixed:disabled{background:#98a2b3;color:#e9edf1;box-shadow:none}' +
     '#ptx7-rx-foot{font-size:26px;min-height:58px;padding:16px}' +
+    '.ptx7-count{margin:18px 0;padding:22px;border-radius:22px;border:6px solid #007a83;background:#eef7f8;text-align:center}' +
+    '.ptx7-count .num{font:900 96px Arial;line-height:1;color:#005a61}' +
+    '.ptx7-count .lbl{font:900 34px Arial;margin-top:8px;color:#172b3a}' +
+    '.ptx7-count .bar{height:38px;border-radius:19px;background:#d5e3e6;margin-top:18px;overflow:hidden}' +
+    '.ptx7-count .fill{height:100%;background:#007a83;transition:width .25s}' +
+    '.ptx7-count.done{border-color:#087f3f;background:#e6f6eb}.ptx7-count.done .num{color:#087f3f}.ptx7-count.done .fill{background:#087f3f}' +
+    '.ptx7-count.over{border-color:#b42318;background:#fff1f0}.ptx7-count.over .num{color:#b42318}.ptx7-count.over .fill{background:#b42318}' +
+    '.ptx7-count.bump{animation:ptx7bump .45s ease-out}' +
+    '@keyframes ptx7bump{0%{transform:scale(1.08);box-shadow:0 0 0 14px #007a8355}100%{transform:scale(1);box-shadow:none}}' +
     '@media(max-width:900px){#ptx7-rx-bar .title{font-size:46px}.ptx7-rx-head{font-size:56px}.ptx7-rx-success .loc{font-size:80px}.ptx7-rx-btn{font-size:42px}}';
   root.appendChild(STYLE);
 
@@ -696,11 +705,36 @@
     }catch(e){}
   }
   var lastSpokenLocations='';
+  var lastCountKey='', countBumpAt=0;
+  // Count of this item scanned so far (confirmed + pending) against PO ordered.
+  function itemCount(detail){
+    if(!detail||!detail.ordered||!detail.ordered.pkgs)return null;
+    var done=detail.received?detail.received.pkgs:(detail.scanned?detail.scanned.pkgs:0);
+    return {done:done,total:detail.ordered.pkgs};
+  }
+  function itemCountHtml(detail){
+    var c=itemCount(detail);if(!c)return '';
+    var cls='ptx7-count'+(c.done>c.total?' over':(c.done===c.total?' done':''))+(Date.now()-countBumpAt<600?' bump':'');
+    var label=c.done>c.total?('OVER BY '+(c.done-c.total)+' \u2014 CHECK PIMS'):(c.done===c.total?'ALL '+c.total+' SCANNED \u2714':(c.total-c.done)+' REMAINING');
+    var pct=Math.min(100,Math.round(c.done/c.total*100));
+    return '<div class="'+cls+'"><div class="num">'+esc(c.done)+' / '+esc(c.total)+'</div>'+
+      '<div class="lbl">'+esc(label)+'</div><div class="bar"><div class="fill" style="width:'+pct+'%"></div></div></div>';
+  }
   setInterval(function(){
     if(root.style.display!=='block'||state.phase!=='RECEIVE')return;
     var detail=currentReceiveDetail();var key=detail&&detail.locations?detail.ndc+'|'+detail.locations.join('|'):'';
     if(key&&key!==lastSpokenLocations){lastSpokenLocations=key;speakLocations(detail.locations,false);}
     if(!detail)lastSpokenLocations='';
+    // Like-item count-up: the protected mirror re-renders only on NDC changes,
+    // so refresh here whenever the same item's scanned count changes.
+    var count=itemCount(detail),countKey=detail&&count?detail.ndc+'#'+count.done:'';
+    if(countKey!==lastCountKey){
+      var sameItem=lastCountKey&&countKey&&lastCountKey.split('#')[0]===countKey.split('#')[0];
+      var increased=sameItem&&Number(countKey.split('#')[1])>Number(lastCountKey.split('#')[1]);
+      lastCountKey=countKey;
+      if(increased){countBumpAt=Date.now();tone(true);}
+      if(sameItem)render();
+    }
   },500);
 
   var settings=document.createElement('section');
@@ -812,10 +846,8 @@
         h += '<div class="ptx7-rx-head">Scan location to complete receive</div>';
         h += '<div class="ptx7-rx-confirm ok"><strong>' + esc(detail.drug || ('NDC ' + detail.ndc)) + '</strong>' +
           '<span class="meta">NDC ' + esc(detail.ndc) + (detail.pkgSize ? ' · Package size ' + esc(detail.pkgSize) + ' ' + esc(detail.unitWord) : '') + '</span>';
-        if (scanned && ordered) {
-          h += '<div style="font-size:38px;margin-top:12px">' + esc(scanned.pkgs) + ' of ' + esc(ordered.pkgs) + ' bottles scanned</div>' +
-            '<span class="meta" style="font-size:26px">' + esc(scanned.units) + ' of ' + esc(ordered.units) + ' ' + esc(detail.unitWord) + '</span>' +
-            '<span class="meta">' + esc(confirmedPkgs) + ' confirmed · ' + esc(pendingPkgs) + ' pending (' + esc(confirmedUnits) + ' confirmed · ' + esc(pendingUnits) + ' pending)</span>';
+        if (ordered && (scanned || received)) {
+          h += '<span class="meta">' + esc(confirmedPkgs) + ' confirmed · ' + esc(pendingPkgs) + ' pending (' + esc(confirmedUnits) + ' confirmed · ' + esc(pendingUnits) + ' pending)</span>';
         } else if (scanned) {
           h += '<div style="font-size:38px;margin-top:12px">' + esc(scanned.pkgs) + ' bottle' + (scanned.pkgs === 1 ? '' : 's') + ' scanned</div>' +
             '<span class="meta">Expected quantity unavailable</span>';
@@ -823,6 +855,7 @@
           h += '<span class="meta">Pending quantity loading from PIMS</span>';
         }
         h += '</div>';
+        h += itemCountHtml(detail);
         if (detail.warnings && detail.warnings.length) h += '<div class="ptx7-rx-confirm bad">⚠ ' + esc(detail.warnings.join(' · ')) + '</div>';
         if (detail.locations && detail.locations.length) {
           h += '<div class="ptx7-rx-sub" style="font-weight:900">Suggested locations</div>';

@@ -21,6 +21,8 @@
   var locationSearchBusy = false;
   var locationRenderTimer = null;
   var lastLocationSignature = '';
+  var nativeDialogSeen = false;
+  var nativeActionStartedAt = 0;
 
   function normalize(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
   function esc(value) {
@@ -50,11 +52,17 @@
       /Unreceived\s*\d+\s*\/\s*\d+/i.test(text) || /Back to all Purchase Orders/i.test(text) ||
       /Scan Location to submit receives/i.test(text);
   }
+  // Receiving owns the screen and scanner focus whenever its overlay is open.
+  function receivingOpen() {
+    try { return !!(window.__ptx7Rx && window.__ptx7Rx.isOpen && window.__ptx7Rx.isOpen()); } catch (_) { return false; }
+  }
+  // Route first (cheap); full-page text is read only off the known routes.
   function currentMode() {
-    if (looksReceivingPage()) return 'po';
-    if (/\/locations\b/i.test(location.pathname)) return 'locations';
-    if (/\/inventory\b/i.test(location.pathname)) return 'inventory';
-    return 'other';
+    var path = location.pathname;
+    if (document.querySelector('button[data-testid="submit-receives"]')) return 'po';
+    if (/\/locations\b/i.test(path)) return 'locations';
+    if (/\/inventory\b/i.test(path)) return 'inventory';
+    return looksReceivingPage() ? 'po' : 'other';
   }
 
   var style = document.createElement('style');
@@ -79,6 +87,7 @@
     '#ptx7-location-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:22px 0}' +
     '#ptx7-location-actions button{min-height:90px;border:0;border-radius:15px;background:#075f67;color:#fff;font-size:29px;font-weight:900;padding:16px}' +
     '#ptx7-location-results .ptx7-table{font-size:28px}' +
+    '.ptx7-type-btn{grid-column:1/-1;min-height:80px;border:4px solid #007a83;border-radius:15px;background:#fff;color:#007a83;font-size:30px;font-weight:900}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
     '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
     '#ptx7-inventory-search{display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;background:#fff;padding:22px;border:5px solid #007a83;border-radius:20px;box-shadow:0 5px 18px #0003}' +
@@ -109,8 +118,9 @@
     '<header id="ptx7-inventory-head">INVENTORY</header>' +
     '<main id="ptx7-inventory-content">' +
       '<div id="ptx7-inventory-search">' +
-        '<input id="ptx7-inventory-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan medication barcode or enter NDC-11" aria-label="Inventory NDC search">' +
+        '<input id="ptx7-inventory-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan medication barcode" aria-label="Inventory NDC search">' +
         '<button id="ptx7-inventory-submit" type="button">SEARCH</button>' +
+        '<button id="ptx7-inventory-type" class="ptx7-type-btn" type="button">\u2328 TYPE NDC-11</button>' +
         '<div id="ptx7-inventory-hint">Hardware scans accept UPC, GTIN, GS1, or NDC. Manual entry requires an 11-digit NDC.</div>' +
       '</div>' +
       '<div id="ptx7-inventory-message"></div>' +
@@ -134,8 +144,9 @@
     '<header id="ptx7-location-head">LOCATIONS</header>' +
     '<main id="ptx7-location-content">' +
       '<div id="ptx7-location-search">' +
-        '<input id="ptx7-location-input" type="text" autocomplete="off" placeholder="Scan a stock location" aria-label="Stock location search">' +
+        '<input id="ptx7-location-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan a stock location" aria-label="Stock location search">' +
         '<button id="ptx7-location-submit" type="button">SEARCH</button>' +
+        '<button id="ptx7-location-type" class="ptx7-type-btn" type="button">\u2328 TYPE LOCATION</button>' +
         '<div id="ptx7-location-hint">Scan a location barcode. Scanner input submits automatically.</div>' +
       '</div>' +
       '<div id="ptx7-location-actions">' +
@@ -358,7 +369,8 @@
   }
   function sectionText(headingPattern) {
     var section=sectionContainer(headingPattern);
-    return normalize(section && section.innerText);
+    // Preserve line breaks so rows stay readable when no table is detectable.
+    return section ? String(section.innerText || '').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim() : '';
   }
   function wakeTransactionHistory() {
     if (transactionWakeRequested) return;
@@ -463,6 +475,8 @@
     }
     inventorySimple = false;
     nativeActionActive = !!target;
+    nativeDialogSeen = false;
+    nativeActionStartedAt = Date.now();
     document.documentElement.classList.toggle('ptx7-native-action', nativeActionActive);
     inventoryRoot.style.display = 'none';
     fullButton.textContent = 'RETURN TO SIMPLE INVENTORY';
@@ -474,7 +488,7 @@
   function showNativeLocation(targetLabel){
     var target=targetLabel?nativeButton(targetLabel):null;
     if(targetLabel&&!target){showMessage(targetLabel+' is not available on this location.',false);return;}
-    locationsSimple=false;nativeActionActive=!!target;document.documentElement.classList.toggle('ptx7-native-action',nativeActionActive);locationRoot.style.display='none';fullButton.textContent='RETURN TO SIMPLE LOCATIONS';fullButton.style.display='block';
+    locationsSimple=false;nativeActionActive=!!target;nativeDialogSeen=false;nativeActionStartedAt=Date.now();document.documentElement.classList.toggle('ptx7-native-action',nativeActionActive);locationRoot.style.display='none';fullButton.textContent='RETURN TO SIMPLE LOCATIONS';fullButton.style.display='block';
     if(target)setTimeout(function(){if(document.documentElement.contains(target))target.click();},0);
   }
   inventoryRoot.querySelector('#ptx7-show-full-inventory').addEventListener('click', function () { showNativeInventory(''); });
@@ -544,29 +558,7 @@
     setTimeout(function () { delete button.dataset.ptx7RemovalConfirmed; }, 1000);
   }, true);
 
-  fullButton.addEventListener('click', function () {
-    var mode = currentMode();
-    if (mode === 'inventory') {
-      inventorySimple = true;
-      nativeActionActive = false;
-      document.documentElement.classList.remove('ptx7-native-action');
-      fullButton.style.display = 'none';
-      inventoryRoot.style.display = 'flex';
-      lastRenderSignature = '';
-      renderInventory();
-      setTimeout(function () { try { inventoryInput.focus({preventScroll:true}); } catch (_) {} }, 50);
-      return;
-    }
-    if (mode === 'locations') {
-      locationsSimple = true;
-      nativeActionActive = false;
-      document.documentElement.classList.remove('ptx7-native-action');
-      fullButton.style.display='none';
-      locationRoot.style.display='flex';
-      lastLocationSignature='';renderLocation();
-      setTimeout(function(){try{locationInput.focus({preventScroll:true});}catch(_){}},0);
-    }
-  });
+  fullButton.addEventListener('click', function () { returnToSimple(currentMode()); });
 
   receivePoButton.addEventListener('click', function () {
     try {
@@ -578,9 +570,40 @@
     if (window.__ptx7Rx && window.__ptx7Rx.open) window.__ptx7Rx.open();
   });
 
+  function returnToSimple(mode) {
+    nativeActionActive = false;
+    nativeDialogSeen = false;
+    document.documentElement.classList.remove('ptx7-native-action');
+    fullButton.style.display = 'none';
+    if (mode === 'inventory') {
+      inventorySimple = true; inventoryRoot.style.display = 'flex'; lastRenderSignature = ''; renderInventory();
+      setTimeout(function () { try { inventoryInput.focus({preventScroll:true}); } catch (_) {} }, 50);
+    } else if (mode === 'locations') {
+      locationsSimple = true; locationRoot.style.display = 'flex'; lastLocationSignature = ''; renderLocation();
+      setTimeout(function () { try { locationInput.focus({preventScroll:true}); } catch (_) {} }, 50);
+    }
+  }
+  function standDown() {
+    inventoryRoot.style.display = 'none';
+    locationRoot.style.display = 'none';
+    fullButton.style.display = 'none';
+    receivePoButton.style.display = 'none';
+    document.documentElement.classList.remove('ptx7-simple-pims');
+  }
+
   function maintain() {
+    // Never compete with Receiving for the screen, focus, or layout work.
+    if (receivingOpen()) { standDown(); return; }
     var mode = currentMode();
-    var enlarged = mode === 'inventory' || mode === 'locations' || mode === 'po';
+    // Auto-return once the native Quick Move / Adjust / Add dialog closes.
+    if (nativeActionActive && (mode === 'inventory' || mode === 'locations')) {
+      var dialogOpen = nativeElements('[role="dialog"],[aria-modal="true"]').some(visible);
+      if (dialogOpen) nativeDialogSeen = true;
+      else if (nativeDialogSeen && Date.now() - nativeActionStartedAt > 600) { returnToSimple(mode); return; }
+    }
+    // Enlarge native PIMS only for plain fallback views; never under Receiving,
+    // on the PO page, or while a native dialog has its own styling.
+    var enlarged = (mode === 'inventory' || mode === 'locations') && !nativeActionActive;
     document.documentElement.classList.toggle('ptx7-simple-pims', enlarged);
     inventoryRoot.style.display = mode === 'inventory' && inventorySimple ? 'flex' : 'none';
     locationRoot.style.display = mode === 'locations' && locationsSimple ? 'flex' : 'none';
@@ -609,14 +632,45 @@
   }
 
   new MutationObserver(function (mutations) {
+    if (document.hidden || receivingOpen()) return;
     var nativeChanged=mutations.some(function(mutation){return !isToolElement(mutation.target);});
     if(!nativeChanged)return;
     clearTimeout(maintain.timer);
     maintain.timer = setTimeout(maintain, 120);
   }).observe(document.documentElement, {subtree:true, childList:true});
   maintain();
-  setInterval(maintain, 1500);
-  window.__ptx7PimsTools = {showInventory:function () {
+  setInterval(function(){ if (!document.hidden) maintain(); }, 1500);
+  function enableTyping(input, mode) {
+    input.setAttribute('inputmode', mode);
+    input.value = '';
+    try { input.blur(); } catch (_) {}
+    setTimeout(function () { try { input.focus(); } catch (_) {} }, 30);
+  }
+  function restoreScanOnly(input) { input.setAttribute('inputmode', 'none'); }
+  inventoryRoot.querySelector('#ptx7-inventory-type').addEventListener('click', function () { enableTyping(inventoryInput, 'numeric'); });
+  locationRoot.querySelector('#ptx7-location-type').addEventListener('click', function () { enableTyping(locationInput, 'text'); });
+  inventoryInput.addEventListener('blur', function () { restoreScanOnly(inventoryInput); });
+  locationInput.addEventListener('blur', function () { restoreScanOnly(locationInput); });
+
+  // Scans delivered by Android broadcast (not keystrokes) while Receiving is closed.
+  function onHostScan(raw) {
+    var value = String(raw == null ? '' : raw).trim();
+    if (!value || receivingOpen()) return false;
+    if (value === lastSubmitted && Date.now() - lastSubmittedAt < 1500) return false;
+    var mode = currentMode();
+    if (mode === 'inventory' && inventorySimple) return submitInventorySearch(value, true);
+    if (mode === 'locations' && locationsSimple) return submitLocationSearch(value, true);
+    return false;
+  }
+  // Android Back: leave a native fallback view and return to the simple view.
+  function handleBack() {
+    if (receivingOpen()) return false;
+    var mode = currentMode();
+    if ((mode === 'inventory' && !inventorySimple) || (mode === 'locations' && !locationsSimple)) { returnToSimple(mode); return true; }
+    return false;
+  }
+
+  window.__ptx7PimsTools = {onHostScan:onHostScan, handleBack:handleBack, showInventory:function () {
     inventorySimple = true;
     nativeActionActive = false;
     document.documentElement.classList.remove('ptx7-native-action');

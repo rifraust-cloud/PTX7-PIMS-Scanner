@@ -3058,6 +3058,13 @@ class MainActivity : ComponentActivity() {
                 )
                 if (receivingModeOpen) {
                     forwardScanToOverlay(data)
+                } else {
+                    // Broadcast-delivered scans also work in Inventory/Locations.
+                    webView.evaluateJavascript(
+                        "if (window.__ptx7PimsTools && window.__ptx7PimsTools.onHostScan) " +
+                            "window.__ptx7PimsTools.onHostScan(${JSONObject.quote(data)});",
+                        null
+                    )
                 }
             }
         }
@@ -3149,7 +3156,8 @@ class MainActivity : ComponentActivity() {
     override fun onBackPressed() {
         // If Receiving Mode is open, back should close it, not navigate PIMS.
         webView.evaluateJavascript(
-            "(window.__ptx7Rx && window.__ptx7Rx.isOpen()) ? (window.__ptx7Rx.close(), 'closed') : 'none'"
+            "(window.__ptx7Rx && window.__ptx7Rx.isOpen()) ? (window.__ptx7Rx.close(), 'closed') : " +
+                "((window.__ptx7PimsTools && window.__ptx7PimsTools.handleBack && window.__ptx7PimsTools.handleBack()) ? 'closed' : 'none')"
         ) { result ->
             val handled = result != null && result.contains("closed")
             if (!handled) {
