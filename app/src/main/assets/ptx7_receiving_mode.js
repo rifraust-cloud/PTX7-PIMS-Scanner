@@ -696,7 +696,13 @@
   }
   function speakLocations(locations,force){
     try{
-      if(!window.speechSynthesis||(!force&&!voiceEnabled()))return;
+      if(!force&&!voiceEnabled())return;
+      var nativeList=(locations||[]).filter(Boolean);
+      try{if(nativeList.length&&window.PTX7Host&&window.PTX7Host.speak&&(!window.PTX7Host.ttsAvailable||window.PTX7Host.ttsAvailable())){
+        var nativeText=nativeList.length===1?spokenLocation(nativeList[0]):'Multiple valid locations. '+nativeList.map(spokenLocation).join('. ');
+        var nativeVoice='';try{nativeVoice=localStorage.getItem('ptx7_buddy_voice')||'';}catch(_){}
+        window.PTX7Host.speak(nativeText,voiceRate(),nativeVoice);return;}}catch(_){}
+      if(!window.speechSynthesis)return;
       var list=(locations||[]).filter(Boolean);if(!list.length)return;
       window.speechSynthesis.cancel();
       var text=list.length===1?spokenLocation(list[0]):'Multiple valid locations. '+list.map(spokenLocation).join('. ');

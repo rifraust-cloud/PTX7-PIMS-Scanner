@@ -41,6 +41,9 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import org.json.JSONObject
+import org.json.JSONArray
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -270,6 +273,7 @@ class MainActivity : ComponentActivity() {
         // Register before the first page load so native PO and Search New PO
         // controls can call the host even if Receiving has not been opened yet.
         registerReceivingBridge()
+        initTts()
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
@@ -2939,6 +2943,47 @@ class MainActivity : ComponentActivity() {
     private var lastScanKeyAt = 0L
     private var receivingBridgeRegistered = false
 
+    // Location Buddy: native Android text-to-speech, loud and clear on the
+    // media stream so it works with screen-off glances and finger scanners.
+    private var tts: TextToSpeech? = null
+    @Volatile private var ttsReady = false
+
+    private fun initTts() {
+        if (tts != null) return
+        tts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+                ttsReady = true
+            }
+        }
+    }
+
+    private fun speakNative(text: String, rate: Float, voiceName: String) {
+        val engine = tts ?: return
+        if (!ttsReady || text.isBlank()) return
+        engine.setSpeechRate(rate.coerceIn(0.5f, 2.0f))
+        if (voiceName.isNotBlank()) {
+            engine.voices?.firstOrNull { it.name == voiceName }?.let { engine.voice = it }
+        }
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, android.media.AudioManager.STREAM_MUSIC)
+        }
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "ptx7-buddy")
+    }
+
+    private fun ttsVoicesJson(): String {
+        val list = JSONArray()
+        val engine = tts ?: return list.toString()
+        if (!ttsReady) return list.toString()
+        engine.voices?.filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+            ?.sortedBy { it.name }
+            ?.forEach { v ->
+                list.put(JSONObject().put("name", v.name).put("locale", v.locale.toString()))
+            }
+        return list.toString()
+    }
+
     private fun applySavedOrientation() {
         val mode = getSharedPreferences("ptx7_pims", Context.MODE_PRIVATE)
             .getString(ORIENTATION_PREF, "AUTO") ?: "AUTO"
@@ -2982,6 +3027,18 @@ class MainActivity : ComponentActivity() {
                     .putString(ORIENTATION_PREF, normalized).apply()
                 runOnUiThread { applySavedOrientation() }
             }
+            @android.webkit.JavascriptInterface
+            fun speak(text: String, rate: Float, voiceName: String) {
+                runOnUiThread { speakNative(text, rate, voiceName) }
+            }
+            @android.webkit.JavascriptInterface
+            fun stopSpeaking() {
+                runOnUiThread { tts?.stop() }
+            }
+            @android.webkit.JavascriptInterface
+            fun ttsAvailable(): Boolean = ttsReady
+            @android.webkit.JavascriptInterface
+            fun ttsVoices(): String = ttsVoicesJson()
         }, "PTX7Host")
         receivingBridgeRegistered = true
     }
@@ -3158,6 +3215,9 @@ class MainActivity : ComponentActivity() {
 
             scanFeedbackSound.release()
         }
+
+        tts?.shutdown()
+        tts = null
 
         super.onDestroy()
 

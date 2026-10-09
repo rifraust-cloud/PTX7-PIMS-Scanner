@@ -39,7 +39,7 @@
     return css.display !== 'none' && css.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   }
   function isToolElement(element) {
-    return !!(element && element.closest && element.closest('#ptx7-remove-confirm,#ptx7-inventory-root,#ptx7-location-root,#ptx7-full-view-toggle,#ptx7-route-message,#ptx7-receive-current-po,#ptx7-rx-root'));
+    return !!(element && element.closest && element.closest('#ptx7-buddy-sheet,#ptx7-adjust-root,#ptx7-remove-confirm,#ptx7-inventory-root,#ptx7-location-root,#ptx7-full-view-toggle,#ptx7-route-message,#ptx7-receive-current-po,#ptx7-rx-root'));
   }
   function nativeElements(selector) {
     return [].slice.call(document.querySelectorAll(selector)).filter(function (element) { return !isToolElement(element); });
@@ -92,6 +92,8 @@
     '#ptx7-location-results .ptx7-table{font-size:28px}' +
     '#ptx7-inventory-input:focus,#ptx7-location-input:focus{outline:none;border-color:#f0a000;box-shadow:0 0 0 8px #f0a00066;animation:ptx7pulse 1.4s ease-in-out infinite}' +
     '@keyframes ptx7pulse{0%,100%{box-shadow:0 0 0 6px #f0a00055}50%{box-shadow:0 0 0 14px #f0a00022}}' +
+    '#ptx7-inventory-input,#ptx7-location-input{background:#fff url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 60 30\'><g fill=\'%23007a83\' opacity=\'.22\'><rect x=\'2\' y=\'3\' width=\'3\' height=\'24\'/><rect x=\'7\' y=\'3\' width=\'1.5\' height=\'24\'/><rect x=\'11\' y=\'3\' width=\'4\' height=\'24\'/><rect x=\'17\' y=\'3\' width=\'1.5\' height=\'24\'/><rect x=\'21\' y=\'3\' width=\'3\' height=\'24\'/><rect x=\'26\' y=\'3\' width=\'1.5\' height=\'24\'/><rect x=\'30\' y=\'3\' width=\'4.5\' height=\'24\'/><rect x=\'37\' y=\'3\' width=\'1.5\' height=\'24\'/><rect x=\'41\' y=\'3\' width=\'3\' height=\'24\'/><rect x=\'47\' y=\'3\' width=\'1.5\' height=\'24\'/><rect x=\'51\' y=\'3\' width=\'4\' height=\'24\'/></g></svg>") no-repeat center/120px 60px!important}' +
+    '#ptx7-inventory-input:not(:placeholder-shown),#ptx7-location-input:not(:placeholder-shown){background-image:none!important}' +
     '.ptx7-scan-label{grid-column:1/-1;font:900 40px Arial;color:#005a61;text-align:center;letter-spacing:1px}' +
     '.ptx7-remove-btn{min-height:76px;min-width:170px;border:0;border-radius:14px;background:#b42318;color:#fff;font:900 28px Arial;padding:10px 16px}' +
     '#ptx7-remove-confirm{position:fixed;inset:0;z-index:2147483646;display:none;align-items:center;justify-content:center;background:#0008}' +
@@ -100,6 +102,57 @@
     '#ptx7-remove-confirm .row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:28px}' +
     '#ptx7-remove-confirm button{min-height:110px;border:0;border-radius:18px;font:900 40px Arial}' +
     '.ptx7-loc-link{display:inline-block;margin:6px 8px 6px 0;min-height:70px;border:4px solid #007a83;border-radius:14px;background:#fff;color:#007a83;font:900 30px Arial;padding:10px 18px;text-decoration:underline}' +
+    '.ptx7-scroll{max-height:30vh;overflow-y:auto;-webkit-overflow-scrolling:touch;border:4px solid #c5d2d8;border-radius:16px;padding:8px;background:#f6f8f9}' +
+    '.ptx7-po-card{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:center;background:#fff;border:4px solid #007a83;border-radius:16px;padding:16px;margin:10px 0}' +
+    '.ptx7-po-card .po{grid-column:1/-1;min-height:84px;border:0;border-radius:14px;background:#007a83;color:#fff;font:900 40px Arial;text-align:left;padding:12px 20px}' +
+    '.ptx7-po-card .k{font:800 24px Arial;color:#394b59}.ptx7-po-card .v{font:900 38px Arial;color:#172b3a}' +
+    '.ptx7-yes{color:#087f3f!important}.ptx7-no{color:#b42318!important}' +
+    '.ptx7-tx{background:#fff;border-left:10px solid #007a83;border-radius:12px;padding:14px 18px;margin:10px 0;font:28px Arial;line-height:1.35}' +
+    '.ptx7-tx .top{display:flex;justify-content:space-between;gap:12px;font-weight:900;font-size:30px}.ptx7-tx .neg{color:#b42318}.ptx7-tx .pos{color:#087f3f}' +
+    '.ptx7-dates{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px}' +
+    '.ptx7-date-btn{position:relative;min-height:110px;border:5px solid #007a83;border-radius:16px;background:#fff;color:#172b3a;font:900 34px Arial;padding:10px;overflow:hidden}' +
+    '.ptx7-date-btn small{display:block;font:800 22px Arial;color:#394b59}' +
+    '.ptx7-date-btn input{position:absolute;inset:0;opacity:0;width:100%;height:100%}' +
+    '#ptx7-adjust-root{position:fixed;inset:0 auto auto 0;width:50%;height:50%;transform:scale(2);transform-origin:top left;z-index:2147483100;display:none;flex-direction:column;background:#f6f8f9;color:#172b3a;font:30px Arial,Helvetica,sans-serif;overflow-y:auto;overflow-x:hidden}' +
+    '#ptx7-adjust-root *{box-sizing:border-box}' +
+    '.ptx7-adj-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:22px;font:900 46px Arial;text-align:center;border-bottom:6px solid #005a61}' +
+    '.ptx7-adj-pims{position:absolute;right:14px;top:18px;min-height:60px;border:3px solid #fff;border-radius:12px;background:transparent;color:#fff;font:900 20px Arial;padding:6px 12px}' +
+    '.ptx7-adj-body{padding:22px 22px 170px}' +
+    '.ptx7-adj-prod{background:#fff;border:4px solid #c5d2d8;border-radius:18px;padding:18px;font:900 32px Arial;line-height:1.2}.ptx7-adj-prod small{display:block;font:700 24px Arial;color:#59636b;margin-top:8px}' +
+    '.ptx7-adj-title{font:900 34px Arial;color:#005a61;margin:24px 4px 12px;letter-spacing:1px}' +
+    '.ptx7-adj-label{font:900 24px Arial;color:#394b59;margin:18px 4px 8px;letter-spacing:1px}' +
+    '.ptx7-adj-tiles{display:grid;grid-template-columns:1fr 1fr;gap:14px}' +
+    '.ptx7-adj-btn{min-height:96px;border:0;border-radius:18px;font:900 30px Arial;padding:14px}' +
+    '.ptx7-adj-btn.tile{background:#fff;color:#172b3a;border:5px solid #c5d2d8}.ptx7-adj-btn.tile.on{border-color:#007a83;background:#e6f4f5;color:#005a61}' +
+    '.ptx7-adj-btn.primary{background:#007a83;color:#fff}.ptx7-adj-btn.ghost{background:#fff;color:#007a83;border:4px solid #007a83}.ptx7-adj-btn.danger{background:#b42318;color:#fff}.ptx7-adj-btn.wide{width:100%;margin-top:16px}' +
+    '.ptx7-adj-nav{display:grid;grid-template-columns:1fr 1.4fr;gap:16px;margin-top:26px}' +
+    '.ptx7-adj-comment{width:100%;min-height:170px;border:5px solid #b42318;border-radius:16px;padding:16px;font:30px Arial}' +
+    '.ptx7-adj-card{background:#fff;border:4px solid #c5d2d8;border-radius:18px;padding:18px;margin:16px 0}.ptx7-adj-card.on{border-color:#007a83;background:#f0f9fa}' +
+    '.ptx7-adj-scan{width:100%;min-height:100px;border:5px solid #007a83;border-radius:15px;padding:14px 18px;font:900 36px Arial}' +
+    '.ptx7-adj-scan:focus{outline:none;border-color:#f0a000;box-shadow:0 0 0 8px #f0a00055}' +
+    '.ptx7-adj-area{font:900 36px Arial;color:#005a61;padding:6px 0 12px}' +
+    '.ptx7-adj-qty{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center;font:900 38px Arial}.ptx7-adj-qty small{display:block;font:800 20px Arial;color:#59636b}' +
+    '.ptx7-adj-total{background:#fff4e5;border:4px solid #f0a000;border-radius:14px;padding:16px;font:900 28px Arial;color:#8a4b00}' +
+    '.ptx7-adj-hint{font:700 24px Arial;color:#59636b;margin:12px 4px}' +
+    '.ptx7-wheel{position:relative;height:276px;margin-top:10px;background:#fff;border:4px solid #c5d2d8;border-radius:18px;overflow:hidden}' +
+    '.ptx7-wheel-band{position:absolute;left:0;right:0;top:92px;height:92px;border-top:4px solid #007a83;border-bottom:4px solid #007a83;background:#e6f4f5;pointer-events:none}' +
+    '.ptx7-wheel-list{position:relative;height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;padding:92px 0;scrollbar-width:none}' +
+    '.ptx7-wheel-list::-webkit-scrollbar{display:none}' +
+    '.ptx7-wheel-item{height:92px;line-height:92px;text-align:center;scroll-snap-align:center;font:700 30px Arial;color:#9aa5ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px}' +
+    '.ptx7-wheel-item.sel{font:900 38px Arial;color:#172b3a}' +
+    '.ptx7-adj-confirm{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;background:#0008}' +
+    '.ptx7-adj-confirm .box{width:88%;background:#fff;border:7px solid #b42318;border-radius:24px;padding:30px}.ptx7-adj-confirm h2{font:900 44px Arial;color:#b42318;margin:0 0 14px;text-align:center}.ptx7-adj-confirm p{font:800 30px Arial;text-align:center}' +
+    '#ptx7-buddy-bar{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin:18px 0 0}' +
+    '.ptx7-buddy-btn{min-height:92px;border:0;border-radius:16px;font:900 30px Arial;padding:12px}' +
+    '.ptx7-buddy-btn.on{background:#087f3f;color:#fff}.ptx7-buddy-btn.off{background:#e5e9ec;color:#394b59}.ptx7-buddy-btn.cfg{background:#fff;color:#007a83;border:4px solid #007a83}' +
+    '#ptx7-buddy-sheet{position:fixed;inset:0;z-index:6;display:none;background:#0008;align-items:flex-start;justify-content:center;overflow-y:auto}' +
+    '#ptx7-buddy-sheet .box{width:94%;margin:30px 0 200px;background:#fff;border:6px solid #007a83;border-radius:24px;padding:26px}' +
+    '#ptx7-buddy-sheet h2{font:900 44px Arial;color:#005a61;margin:0 0 6px;text-align:center}' +
+    '#ptx7-buddy-sheet .lbl{font:900 24px Arial;color:#394b59;margin:22px 0 10px;letter-spacing:1px}' +
+    '.ptx7-buddy-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.ptx7-buddy-tiles.two{grid-template-columns:1fr 1fr}' +
+    '.ptx7-buddy-tile{min-height:86px;border:5px solid #c5d2d8;border-radius:16px;background:#fff;color:#172b3a;font:900 26px Arial}.ptx7-buddy-tile.sel{border-color:#007a83;background:#e6f4f5;color:#005a61}' +
+    '.ptx7-buddy-voice{width:100%;min-height:96px;border:5px solid #007a83;border-radius:16px;font:800 28px Arial;padding:10px;background:#fff}' +
+    '#ptx7-buddy-last{margin-top:14px;font:800 26px Arial;color:#087f3f;text-align:center;min-height:34px}' +
     '.ptx7-type-btn{grid-column:1/-1;min-height:80px;border:4px solid #007a83;border-radius:15px;background:#fff;color:#007a83;font-size:30px;font-weight:900}' +
     '#ptx7-inventory-head{position:sticky;top:0;z-index:3;background:#007a83;color:#fff;padding:24px;font-size:52px;font-weight:900;text-align:center;border-bottom:6px solid #005a61}' +
     '#ptx7-inventory-content{padding:24px 24px 150px;max-width:none;width:100%;margin:0 auto}' +
@@ -132,11 +185,13 @@
     '<main id="ptx7-inventory-content">' +
       '<div id="ptx7-inventory-search">' +
         '<div class="ptx7-scan-label">SCAN MEDICATION BARCODE</div>' +
-        '<input id="ptx7-inventory-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan medication barcode" aria-label="Inventory NDC search">' +
+        '<input id="ptx7-inventory-input" type="text" inputmode="none" autocomplete="off" placeholder="" aria-label="Inventory NDC search">' +
         '<button id="ptx7-inventory-submit" type="button">SEARCH</button>' +
         '<button id="ptx7-inventory-type" class="ptx7-type-btn" type="button">\u2328 TYPE NDC-11</button>' +
-        '<div id="ptx7-inventory-hint">Hardware scans accept UPC, GTIN, GS1, or NDC. Manual entry requires an 11-digit NDC.</div>' +
       '</div>' +
+      '<div id="ptx7-buddy-bar"><button type="button" id="ptx7-buddy-toggle" class="ptx7-buddy-btn on">\uD83D\uDD0A LOCATION BUDDY ON</button>' +
+        '<button type="button" id="ptx7-buddy-config" class="ptx7-buddy-btn cfg">\u2699 VOICE &amp; SPEED</button></div>' +
+      '<div id="ptx7-buddy-last"></div>' +
       '<div id="ptx7-inventory-message"></div>' +
       '<div id="ptx7-inventory-actions">' +
         '<button type="button" data-native-control="Adjust Inventory">ADJUST INVENTORY</button>' +
@@ -148,7 +203,7 @@
         '<option value="locations">LOCATIONS</option><option value="incoming">INCOMING POs</option>' +
         '<option value="transactions">TRANSACTIONS</option>' +
       '</select>' +
-      '<div id="ptx7-inventory-results"><div class="ptx7-card ptx7-empty">Scan a medication barcode or enter an NDC-11.</div></div>' +
+      '<div id="ptx7-inventory-results"></div>' +
     '</main>';
   document.body.appendChild(inventoryRoot);
 
@@ -159,17 +214,16 @@
     '<main id="ptx7-location-content">' +
       '<div id="ptx7-location-search">' +
         '<div class="ptx7-scan-label">SCAN LOCATION BARCODE</div>' +
-        '<input id="ptx7-location-input" type="text" inputmode="none" autocomplete="off" placeholder="Scan a stock location" aria-label="Stock location search">' +
+        '<input id="ptx7-location-input" type="text" inputmode="none" autocomplete="off" placeholder="" aria-label="Stock location search">' +
         '<button id="ptx7-location-submit" type="button">SEARCH</button>' +
         '<button id="ptx7-location-type" class="ptx7-type-btn" type="button">\u2328 TYPE LOCATION</button>' +
-        '<div id="ptx7-location-hint">Scan a location barcode. Scanner input submits automatically.</div>' +
       '</div>' +
       '<div id="ptx7-location-actions">' +
         '<button type="button" data-location-control="Add Product">ADD PRODUCT</button>' +
         '<button type="button" data-location-control="Add Stock Location">ADD STOCK LOCATION</button>' +
         '<button type="button" id="ptx7-full-location">FULL LOCATION MANAGEMENT</button>' +
       '</div>' +
-      '<div id="ptx7-location-results"><div class="ptx7-card ptx7-empty">Scan a stock location to view its products and quantities.</div></div>' +
+      '<div id="ptx7-location-results"></div>' +
     '</main>';
   document.body.appendChild(locationRoot);
 
@@ -237,7 +291,7 @@
   function queueRetry(kind, value, scannerInput) {
     clearTimeout(retryTimer);
     var target = kind === 'inventory' ? results : locationResults;
-    target.innerHTML = '<div class="ptx7-card"><strong>Waiting for PIMS… ' + esc(value) + ' will search automatically.</strong></div>';
+    target.innerHTML = '<div class="ptx7-card"><strong>Waiting for PIMS\u2026 ' + esc(value) + ' will search automatically.</strong></div>';
     var started = Date.now();
     (function attempt() {
       retryTimer = setTimeout(function () {
@@ -260,6 +314,130 @@
     locationSearchBusy = false;
     return submitLocationSearch(value, scannerInput) !== false;
   }
+
+  // ---------------------------------------------------------------------------
+  // Location Buddy: after each Inventory scan, read the product's locations
+  // aloud (e.g. MANFW0101-F-11 -> "one zero one, F, eleven") so stock can be
+  // put away with a finger scanner without looking at the screen.
+  // ---------------------------------------------------------------------------
+  var BUDDY_ON = 'ptx7_buddy_on', BUDDY_RATE = 'ptx7_buddy_rate', BUDDY_VOICE = 'ptx7_buddy_voice', BUDDY_REPEAT = 'ptx7_buddy_repeat';
+  var DIGITS = ['zero','one','two','three','four','five','six','seven','eight','nine'];
+  var buddyPendingAt = 0, buddyNdcAtSubmit = '', buddyTimers = [];
+  function pref(key, fallback) { try { var v = localStorage.getItem(key); return v == null ? fallback : v; } catch (_) { return fallback; } }
+  function setPref(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
+  function buddyOn() { return pref(BUDDY_ON, 'true') !== 'false'; }
+  function digitsAsWords(d) { return String(d).split('').map(function (c) { return DIGITS[Number(c)]; }).join(' '); }
+  function spokenCode(code) {
+    return String(code).toUpperCase().split('-').map(function (part, i) {
+      if (i === 0) {
+        var d = (part.match(/(\d+)$/) || [])[1];
+        return d ? digitsAsWords(d.replace(/^0+(?=\d{3})/, '')) : part.split('').join(' ');
+      }
+      if (/^\d+$/.test(part)) return String(Number(part));
+      return part.split('').join(' ');
+    }).join(', ');
+  }
+  function buddyMessage(codes) {
+    if (!codes.length) return 'No location assigned.';
+    var spoken = codes.map(spokenCode);
+    var text = codes.length === 1 ? 'Location. ' + spoken[0] + '.' : codes.length + ' locations. ' + spoken.join('. Then, ') + '.';
+    return pref(BUDDY_REPEAT, '1') === '2' ? text + ' Again. ' + text : text;
+  }
+  function buddySpeak(text) {
+    var rate = Number(pref(BUDDY_RATE, '1')) || 1;
+    try {
+      if (window.PTX7Host && window.PTX7Host.speak && (!window.PTX7Host.ttsAvailable || window.PTX7Host.ttsAvailable())) {
+        window.PTX7Host.speak(text, rate, pref(BUDDY_VOICE, ''));
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text); u.rate = rate; u.volume = 1; u.lang = 'en-US';
+      window.speechSynthesis.speak(u);
+    } catch (_) {}
+  }
+  function nativeNdc() { var m = nativeBodyText().match(/\bNDC\s*-?\s*(\d{9,14})\b/i); return m ? m[1] : ''; }
+  function nativeLocationCodes() {
+    var t = findTable([/Subarea/i, /Location/i, /Quantity/i]);
+    var found = {}, list = [];
+    (String(t ? t.innerText : '').toUpperCase().match(LOCATION_CODE) || []).forEach(function (c) { if (!found[c]) { found[c] = true; list.push(c); } });
+    return list;
+  }
+  function armBuddy() {
+    buddyTimers.forEach(clearTimeout); buddyTimers = [];
+    if (!buddyOn()) return;
+    buddyPendingAt = Date.now(); buddyNdcAtSubmit = nativeNdc();
+    [500, 900, 1400, 2000, 2800, 3800].forEach(function (ms) { buddyTimers.push(setTimeout(buddyCheck, ms)); });
+  }
+  function buddyCheck() {
+    if (!buddyPendingAt) return;
+    var age = Date.now() - buddyPendingAt, ndc = nativeNdc();
+    var fresh = ndc && (ndc !== buddyNdcAtSubmit || age > 1300);
+    if (!fresh && age < 3700) return;
+    var codes = fresh ? nativeLocationCodes() : [];
+    if (!codes.length && age < 2700) return;
+    buddyPendingAt = 0; buddyTimers.forEach(clearTimeout); buddyTimers = [];
+    var msg = fresh ? buddyMessage(codes) : 'Product not found.';
+    var last = inventoryRoot.querySelector('#ptx7-buddy-last');
+    if (last) last.textContent = codes.length ? '\uD83D\uDD0A ' + codes.join('  \u00b7  ') : '\uD83D\uDD0A ' + msg;
+    buddySpeak(msg);
+  }
+
+  var buddySheet = document.createElement('div'); buddySheet.id = 'ptx7-buddy-sheet';
+  inventoryRoot.appendChild(buddySheet);
+  function buddyVoices() {
+    var list = [];
+    try { if (window.PTX7Host && window.PTX7Host.ttsVoices) list = JSON.parse(window.PTX7Host.ttsVoices() || '[]'); } catch (_) {}
+    if (!list.length && window.speechSynthesis) {
+      list = window.speechSynthesis.getVoices().filter(function (v) { return /^en/i.test(v.lang || ''); }).map(function (v) { return {name: v.name, locale: v.lang}; });
+    }
+    return list;
+  }
+  function voiceLabel(v) {
+    var n = String(v.name || '');
+    var accent = /en[-_]US/i.test(v.locale) ? 'US' : /en[-_]GB/i.test(v.locale) ? 'UK' : /en[-_]AU/i.test(v.locale) ? 'Australia' : /en[-_]IN/i.test(v.locale) ? 'India' : String(v.locale || '');
+    var tag = (n.match(/-(x-[a-z0-9]+)-/i) || [])[1] || '';
+    return accent + (tag ? ' \u00b7 voice ' + tag.replace('x-', '').toUpperCase() : (n ? ' \u00b7 ' + n : ''));
+  }
+  function tiles(options, current, key) {
+    return options.map(function (o) {
+      return '<button type="button" class="ptx7-buddy-tile' + (String(o[0]) === String(current) ? ' sel' : '') + '" data-pref="' + key + '" data-val="' + esc(o[0]) + '">' + esc(o[1]) + '</button>';
+    }).join('');
+  }
+  function openBuddySheet() {
+    var voices = buddyVoices(), cur = pref(BUDDY_VOICE, '');
+    buddySheet.innerHTML = '<div class="box"><h2>LOCATION BUDDY</h2>' +
+      '<div class="lbl">SPEED</div><div class="ptx7-buddy-tiles">' + tiles([['0.8','SLOW'],['1','NORMAL'],['1.25','FAST'],['1.5','FASTER']], pref(BUDDY_RATE, '1'), BUDDY_RATE) + '</div>' +
+      '<div class="lbl">REPEAT</div><div class="ptx7-buddy-tiles two">' + tiles([['1','ONCE'],['2','TWICE']], pref(BUDDY_REPEAT, '1'), BUDDY_REPEAT) + '</div>' +
+      '<div class="lbl">VOICE</div><select class="ptx7-buddy-voice"><option value="">Device default</option>' +
+      voices.map(function (v) { return '<option value="' + esc(v.name) + '"' + (v.name === cur ? ' selected' : '') + '>' + esc(voiceLabel(v)) + '</option>'; }).join('') + '</select>' +
+      '<div class="ptx7-adj-nav"><button type="button" class="ptx7-adj-btn ghost" data-buddy="test">\uD83D\uDD0A TEST</button><button type="button" class="ptx7-adj-btn primary" data-buddy="done">DONE</button></div>' +
+      '<div class="lbl" style="text-align:center">Turn up media volume for loud playback.</div></div>';
+    buddySheet.style.display = 'flex';
+  }
+  buddySheet.addEventListener('click', function (e) {
+    var t = e.target.closest && e.target.closest('button'); if (!t) return;
+    if (t.getAttribute('data-pref')) { setPref(t.getAttribute('data-pref'), t.getAttribute('data-val')); openBuddySheet(); buddySpeak(buddyMessage(['MANFW0101-F-11'])); return; }
+    if (t.getAttribute('data-buddy') === 'test') buddySpeak(buddyMessage(['MANFW0101-F-11']));
+    if (t.getAttribute('data-buddy') === 'done') { buddySheet.style.display = 'none'; setTimeout(function () { try { inventoryInput.focus({preventScroll: true}); } catch (_) {} }, 50); }
+  });
+  buddySheet.addEventListener('change', function (e) {
+    if (e.target.classList.contains('ptx7-buddy-voice')) { setPref(BUDDY_VOICE, e.target.value); buddySpeak(buddyMessage(['MANFW0101-F-11'])); }
+  });
+  function paintBuddyToggle() {
+    var b = inventoryRoot.querySelector('#ptx7-buddy-toggle'); if (!b) return;
+    var on = buddyOn(); b.className = 'ptx7-buddy-btn ' + (on ? 'on' : 'off');
+    b.textContent = on ? '\uD83D\uDD0A LOCATION BUDDY ON' : '\uD83D\uDD07 LOCATION BUDDY OFF';
+  }
+  inventoryRoot.querySelector('#ptx7-buddy-toggle').addEventListener('click', function () {
+    setPref(BUDDY_ON, buddyOn() ? 'false' : 'true'); paintBuddyToggle();
+    if (buddyOn()) buddySpeak('Location buddy on.'); else { try { window.PTX7Host && window.PTX7Host.stopSpeaking && window.PTX7Host.stopSpeaking(); } catch (_) {} }
+    setTimeout(function () { try { inventoryInput.focus({preventScroll: true}); } catch (_) {} }, 50);
+  });
+  inventoryRoot.querySelector('#ptx7-buddy-config').addEventListener('click', openBuddySheet);
+  paintBuddyToggle();
 
   function submitInventorySearch(raw, scannerInput) {
     if (inventorySearchBusy) return false;
@@ -290,7 +468,9 @@
     lastSubmittedAt = Date.now();
     lastRenderSignature = '';
     transactionWakeRequested = false;
-    results.innerHTML = '<div class="ptx7-card"><strong>Searching PIMS for ' + esc(searchValue) + '…</strong></div>';
+    wokenSections = {};
+    results.innerHTML = '<div class="ptx7-card"><strong>Searching PIMS for ' + esc(searchValue) + '\u2026</strong></div>';
+    armBuddy();
     submit.click();
     // Clear only our visible capture field after PIMS has received the value.
     // The native PIMS field remains untouched so its validation stays authoritative.
@@ -347,7 +527,7 @@
       queueRetry('locations', value, scannerInput);return false;
     }
     locationSearchBusy=true;setNativeValue(input,value);lastSubmitted=value;lastSubmittedAt=Date.now();lastLocationSignature='';
-    locationResults.innerHTML='<div class="ptx7-card"><strong>Loading location '+esc(value)+'…</strong></div>';
+    locationResults.innerHTML='<div class="ptx7-card"><strong>Loading location '+esc(value)+'\u2026</strong></div>';
     submit.click();
     setTimeout(function(){locationInput.value='';try{locationInput.focus({preventScroll:true});}catch(_){}},100);
     setTimeout(function(){locationSearchBusy=false;},700);
@@ -480,7 +660,7 @@
     var details=nativeElements('dl,[data-testid*="detail"],[data-testid*="owner"]').map(function(el){return normalize(el.innerText);}).filter(Boolean).slice(0,6);
     var signature=[code,headings.join('|'),details.join('|')].concat(grids.map(function(g){return normalize(g.innerText);})).join('||');
     if(signature===lastLocationSignature)return;lastLocationSignature=signature;
-    if(!code&&!grids.length&&!details.length){locationResults.innerHTML='<div class="ptx7-card ptx7-empty">Scan a stock location to view its products and quantities.</div>';return;}
+    if(!code&&!grids.length&&!details.length){locationResults.innerHTML='';return;}
     var html='<section class="ptx7-card"><h2>LOCATION DETAILS</h2><div class="ptx7-product">'+esc(code||headings[0]||'Stock location')+'</div>';
     if(details.length)html+='<div class="ptx7-native-copy">'+esc(details.join('\n\n'))+'</div>';html+='</section>';
     grids.forEach(function(grid,index){html+='<section class="ptx7-card"><h2>'+(index===0?'PRODUCTS / OWNERS / QUANTITIES':'ADDITIONAL DETAILS')+'</h2>'+tableHtml(grid,false)+'</section>';});
@@ -499,6 +679,120 @@
   }
   function scheduleLocationRender(delay){clearTimeout(locationRenderTimer);locationRenderTimer=setTimeout(renderLocation,delay||100);}
 
+  // ---- Section-based readers for Incoming Purchases / Transaction History ----
+  // PIMS tables can render a header-only sticky copy; read every data row in
+  // the section instead of trusting the first matching <table>.
+  var txState = {start:'', end:''};
+  var SECTION_HEADINGS = /Incoming Purchases|Transaction History|Related Dispensable/i;
+  function sectionRoot(headingPattern) {
+    var headings = nativeElements('h1,h2,h3,h4,[role="heading"]');
+    var heading = headings.find(function (el) { return headingPattern.test(normalize(el.innerText)); });
+    if (!heading) return null;
+    var others = headings.filter(function (h) { return h !== heading && !heading.contains(h) && !h.contains(heading) && SECTION_HEADINGS.test(normalize(h.innerText)); });
+    var best = heading.parentElement, node = best;
+    for (var i = 0; node && node !== document.body && i < 8; i++, node = node.parentElement) {
+      // Stop before an ancestor that also holds a different section.
+      if (others.some(function (h) { return node.contains(h); })) break;
+      best = node;
+      if (node.querySelector('tbody tr td,[role="row"] [role="cell"],[role="row"] [role="gridcell"]')) return node;
+    }
+    return best;
+  }
+  function readSectionGrid(section) {
+    if (!section) return {headers:[], rows:[]};
+    var headers = [];
+    [].slice.call(section.querySelectorAll('table,[role="table"],[role="grid"]')).some(function (t) {
+      var h = [].slice.call(t.querySelectorAll('thead th,[role="columnheader"]')).map(function (c) { return normalize(c.innerText); });
+      if (h.filter(Boolean).length) { headers = h; return true; } return false;
+    });
+    var seen = {}, rows = [];
+    [].slice.call(section.querySelectorAll('tbody tr,[role="row"]')).forEach(function (r) {
+      if (r.querySelector('th,[role="columnheader"]') && !r.querySelector('td,[role="cell"],[role="gridcell"]')) return;
+      var cells = [].slice.call(r.querySelectorAll(':scope > td,:scope > [role="cell"],:scope > [role="gridcell"]'));
+      if (!cells.length) return;
+      var texts = cells.map(function (c) { return normalize(c.innerText || c.getAttribute('aria-label') || ''); });
+      var key = texts.join('|'); if (!key.replace(/\|/g, '') || seen[key]) return; seen[key] = true;
+      rows.push({cells:cells, texts:texts});
+    });
+    return {headers:headers, rows:rows};
+  }
+  function col(headers, pattern, fallback) {
+    var i = headers.findIndex(function (h) { return pattern.test(h); });
+    return i >= 0 ? i : fallback;
+  }
+  function yesNo(cell, text) {
+    var t = String(text || '');
+    if (!t && cell) { var icon = cell.querySelector('[aria-label],[title],svg'); t = icon ? (icon.getAttribute('aria-label') || icon.getAttribute('title') || '') : ''; }
+    if (/\b(yes|true|receivable|open|success)\b/i.test(t)) return 'YES';
+    if (/\b(no|false|closed|error|not)\b/i.test(t)) return 'NO';
+    return t || '\u2014';
+  }
+  var wokenSections = {};
+  function wakeSection(pattern) {
+    if (wokenSections[pattern.source]) return;
+    var sec = sectionRoot(pattern); if (!sec) return;
+    wokenSections[pattern.source] = true;
+    try { sec.scrollIntoView({block:'center'}); } catch (_) {}
+  }
+  function incomingHtml() {
+    var grid = readSectionGrid(sectionRoot(/Incoming Purchases/i)), h = grid.headers;
+    if (!grid.rows.length) return '<div class="ptx7-empty">No incoming purchase orders returned by PIMS.</div>';
+    var iPo = col(h, /PO Number/i, 1), iPur = col(h, /Purchased/i, 2), iRec = col(h, /Received/i, 3), iAble = col(h, /Receivable/i, 4);
+    return '<div class="ptx7-scroll">' + grid.rows.map(function (r) {
+      var poCell = r.cells[iPo], link = poCell && poCell.querySelector('a[href],button,[role="button"],[role="link"]');
+      var idx = poActions.push({href: link && link.getAttribute && link.getAttribute('href'), element: link || poCell}) - 1;
+      var able = yesNo(r.cells[iAble], r.texts[iAble]);
+      return '<div class="ptx7-po-card"><button type="button" class="po" data-po-action="' + idx + '">PO ' + esc(r.texts[iPo] || '\u2014') + ' \u203a</button>' +
+        '<div><div class="k">PURCHASED</div><div class="v">' + esc(r.texts[iPur] || '\u2014') + '</div></div>' +
+        '<div><div class="k">RECEIVED</div><div class="v">' + esc(r.texts[iRec] || '\u2014') + '</div></div>' +
+        '<div><div class="k">RECEIVABLE</div><div class="v ' + (able === 'YES' ? 'ptx7-yes' : able === 'NO' ? 'ptx7-no' : '') + '">' + esc(able) + '</div></div></div>';
+    }).join('') + '</div>';
+  }
+  function nativeDateInputs() {
+    var sec = sectionRoot(/Transaction History/i); if (!sec) return [];
+    return [].slice.call(sec.querySelectorAll('input')).filter(function (i) {
+      var l = (i.getAttribute('placeholder') || '') + ' ' + (i.getAttribute('aria-label') || '') + ' ' + (i.value || '');
+      return /date|\d{1,2}\/\d{1,2}\/\d{2,4}|YYYY|MM/i.test(l);
+    });
+  }
+  function toIso(v) { var m = String(v || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2) : ''; }
+  function fromIso(v) { var m = String(v || '').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[2] + '/' + m[3] + '/' + m[1] : ''; }
+  function niceDate(iso) { var m = String(iso || '').match(/(\d{4})-(\d{2})-(\d{2})/); if (!m) return 'SELECT'; return ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][Number(m[2]) - 1] + ' ' + Number(m[3]) + ', ' + m[1]; }
+  function applyDate(which, iso) {
+    var inputs = nativeDateInputs(), target = inputs[which === 'start' ? 0 : 1];
+    if (!target) { showMessage('PIMS date range is not available yet.', true); return; }
+    txState[which] = iso;
+    try { target.focus(); } catch (_) {}
+    setNativeValue(target, fromIso(iso));
+    target.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+    try { target.blur(); } catch (_) {}
+    // Re-query PIMS with the new range (native Refresh stays hidden from users).
+    setTimeout(function () {
+      var sec = sectionRoot(/Transaction History/i);
+      var refresh = sec && [].slice.call(sec.querySelectorAll('button')).find(function (b) { return /^refresh$/i.test(normalize(b.innerText || b.getAttribute('aria-label'))); });
+      if (refresh) refresh.click();
+      lastRenderSignature = ''; scheduleRender(700);
+      setTimeout(function () { try { inventoryInput.focus({preventScroll:true}); } catch (_) {} }, 400);
+    }, 150);
+  }
+  function transactionsHtml() {
+    var inputs = nativeDateInputs();
+    var start = txState.start || toIso(inputs[0] && inputs[0].value), end = txState.end || toIso(inputs[1] && inputs[1].value);
+    var html = '<div class="ptx7-dates">' +
+      '<label class="ptx7-date-btn"><small>START DATE</small>' + esc(niceDate(start)) + '<input type="date" data-tx-date="start" value="' + esc(start) + '"></label>' +
+      '<label class="ptx7-date-btn"><small>END DATE</small>' + esc(niceDate(end)) + '<input type="date" data-tx-date="end" value="' + esc(end) + '"></label></div>';
+    var grid = readSectionGrid(sectionRoot(/Transaction History/i)), h = grid.headers;
+    if (!grid.rows.length) return html + '<div class="ptx7-empty">No transactions in this date range.</div>';
+    var iDate = col(h, /^Date/i, 0), iType = col(h, /Type/i, 1), iQty = col(h, /^Quantity/i, 2), iVal = col(h, /^Value/i, 3), iOn = col(h, /Onhand/i, 4), iUser = col(h, /User/i, 5), iRea = col(h, /Reason/i, 6);
+    return html + '<div class="ptx7-scroll">' + grid.rows.map(function (r) {
+      var q = r.texts[iQty] || '', cls = /^-/.test(q) ? 'neg' : (q ? 'pos' : '');
+      return '<div class="ptx7-tx"><div class="top"><span>' + esc(r.texts[iType] || '') + '</span><span class="' + cls + '">' + esc(q) + '</span></div>' +
+        '<div>' + esc(r.texts[iDate] || '') + '</div>' +
+        '<div>On-hand after: <strong>' + esc(r.texts[iOn] || '\u2014') + '</strong> \u00b7 ' + esc(r.texts[iVal] || '') + '</div>' +
+        '<div>' + esc(r.texts[iUser] || '') + (r.texts[iRea] ? ' \u00b7 ' + esc(r.texts[iRea]) : '') + '</div></div>';
+    }).join('') + '</div>';
+  }
+
   function renderInventory() {
     if (currentMode() !== 'inventory' || !inventorySimple) return;
     var text = nativeBodyText();
@@ -514,18 +808,21 @@
     var selection = detailSelect.value;
     if (selection === 'transactions' || selection === 'all') wakeTransactionHistory();
     var locationsTable = findTable([/Subarea/i, /Location/i, /Quantity/i]);
-    var incomingTable = findTable([/PO Number/i, /Receiv/i]);
-    var transactionTable = findTable([/Date/i, /Quantity/i, /Onhand After|Reason|User/i]);
-    var transactionFallback = sectionText(/Transaction History/i);
+    if (selection === 'incoming' || selection === 'all') wakeSection(/Incoming Purchases/i);
+    var incomingGrid = readSectionGrid(sectionRoot(/Incoming Purchases/i));
+    var txGrid = readSectionGrid(sectionRoot(/Transaction History/i));
+    var dateInputs = nativeDateInputs();
     var signature = [selection, product, ndc, onhandMatch && onhandMatch[1], valueMatch && valueMatch[1], relatedMatch && relatedMatch[1],
-      locationsTable && normalize(locationsTable.innerText), incomingTable && normalize(incomingTable.innerText),
-      transactionTable && normalize(transactionTable.innerText), transactionFallback].join('|');
+      locationsTable && normalize(locationsTable.innerText),
+      incomingGrid.rows.map(function (r) { return r.texts.join(','); }).join(';'),
+      txGrid.rows.map(function (r) { return r.texts.join(','); }).join(';'),
+      dateInputs.map(function (i) { return i.value; }).join('~'), txState.start, txState.end].join('|');
     if (signature === lastRenderSignature) return;
     lastRenderSignature = signature;
     poActions = [];
 
     if (!product && !ndc && !onhandMatch) {
-      results.innerHTML = '<div class="ptx7-card ptx7-empty">Scan a medication barcode or enter an NDC-11.</div>';
+      results.innerHTML = '';
       return;
     }
     var overview = '<section class="ptx7-card"><div class="ptx7-product">' + esc(product || 'Inventory product') + '</div>' +
@@ -536,12 +833,8 @@
     var html = '';
     if (selection === 'overview' || selection === 'all') html += overview;
     if (selection === 'locations' || selection === 'all') html += '<section class="ptx7-card"><h2>LOCATIONS <span style="font-size:26px;font-weight:700">(tap to manage)</span></h2>' + tableHtml(locationsTable, 'locations') + '</section>';
-    if (selection === 'incoming' || selection === 'all') html += '<section class="ptx7-card"><h2>INCOMING POs</h2>' + tableHtml(incomingTable, true) + '</section>';
-    if (selection === 'transactions' || selection === 'all') {
-      var transactionContent = transactionTable ? tableHtml(transactionTable, false) :
-        (transactionFallback ? '<div class="ptx7-native-copy">' + esc(transactionFallback) + '</div>' : '<div class="ptx7-empty">No transaction history returned by PIMS.</div>');
-      html += '<section class="ptx7-card"><h2>TRANSACTIONS</h2>' + transactionContent + '</section>';
-    }
+    if (selection === 'incoming' || selection === 'all') html += '<section class="ptx7-card"><h2>INCOMING POs <span style="font-size:26px;font-weight:700">(tap PO to open)</span></h2>' + incomingHtml() + '</section>';
+    if (selection === 'transactions' || selection === 'all') html += '<section class="ptx7-card"><h2>TRANSACTION HISTORY</h2>' + transactionsHtml() + '</section>';
     results.innerHTML = html || overview;
   }
 
@@ -549,7 +842,16 @@
     clearTimeout(renderTimer);
     renderTimer = setTimeout(renderInventory, delay || 100);
   }
-  detailSelect.addEventListener('change', function () { transactionWakeRequested=false; lastRenderSignature = ''; renderInventory(); });
+  detailSelect.addEventListener('change', function () { transactionWakeRequested=false; wokenSections={}; lastRenderSignature = ''; renderInventory(); });
+  results.addEventListener('change', function (event) {
+    var d = event.target && event.target.getAttribute && event.target.getAttribute('data-tx-date');
+    if (d && event.target.value) applyDate(d, event.target.value);
+  });
+  // Open the native Android date wheel/calendar on tap.
+  results.addEventListener('click', function (event) {
+    var input = event.target && event.target.matches && event.target.matches('input[data-tx-date]') ? event.target : null;
+    if (input && input.showPicker) { try { input.showPicker(); } catch (_) {} }
+  });
   results.addEventListener('click', function (event) {
     var locLink = event.target.closest && event.target.closest('[data-goto-location]');
     if (locLink) {
@@ -576,6 +878,276 @@
       return normalize(button.innerText || button.getAttribute('aria-label')).toLowerCase().indexOf(label.toLowerCase()) >= 0;
     });
   }
+  // ---------------------------------------------------------------------------
+  // Adjust Inventory: large PIMS Mobile style skin over the native 3-step
+  // "Perform Adjustment" wizard. Every choice is forwarded to the original PIMS
+  // control; PIMS remains the validator and the submitter.
+  // ---------------------------------------------------------------------------
+  var adjustActive = false, adjustSignature = '', adjustDialog = null;
+  var KNOWN_AREAS = ['Forward', 'External Automation Vial Fill', 'In-Transit'];
+  var adjustRoot = document.createElement('section');
+  adjustRoot.id = 'ptx7-adjust-root';
+  document.body.appendChild(adjustRoot);
+
+  function adjustNativeDialog() {
+    return nativeElements('[role="dialog"],[aria-modal="true"]').filter(visible).find(function (d) {
+      return /Perform Adjustment|Adjust/i.test(normalize(d.innerText).slice(0, 400));
+    }) || null;
+  }
+  function inDialog(selector) {
+    return adjustDialog ? [].slice.call(adjustDialog.querySelectorAll(selector)).filter(function (e) { return !isToolElement(e); }) : [];
+  }
+  function dialogButton(pattern) {
+    return inDialog('button,[role="button"],a').filter(visible).find(function (b) {
+      return pattern.test(normalize(b.innerText || b.getAttribute('aria-label') || ''));
+    }) || null;
+  }
+  function labelFor(el) {
+    var id = el.id, l = id && adjustDialog.querySelector('label[for="' + id + '"]');
+    var wrap = el.closest('label');
+    return normalize((l && l.innerText) || (wrap && wrap.innerText) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.value || '');
+  }
+  function setTextValue(el, value) {
+    var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    var d = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (d && d.set) d.set.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+  function pressEnter(el) {
+    ['keydown', 'keypress', 'keyup'].forEach(function (t) {
+      el.dispatchEvent(new KeyboardEvent(t, {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true}));
+    });
+  }
+  // Native select: either <select> or a Cloudscape-style listbox trigger.
+  function nativeSelects() {
+    var plain = inDialog('select').filter(visible).map(function (s) { return {kind: 'select', el: s}; });
+    var custom = inDialog('[aria-haspopup="listbox"]').filter(visible).filter(function (b) {
+      return !/^(back|next|cancel|close|adjust inventory)$/i.test(normalize(b.innerText));
+    }).map(function (b) { return {kind: 'listbox', el: b}; });
+    return plain.concat(custom);
+  }
+  function selectValueText(s) {
+    if (s.kind === 'select') { var o = s.el.options[s.el.selectedIndex]; return o ? normalize(o.text) : ''; }
+    return normalize(s.el.innerText || s.el.getAttribute('aria-label') || '');
+  }
+  var optionCache = {};
+  function readListboxOptions(s, done) {
+    var key = labelFor(s.el) || 'select';
+    if (optionCache[key] && optionCache[key].length) { done(optionCache[key]); return; }
+    var finish = function (opts) { if (opts.length) optionCache[key] = opts; done(opts); };
+    if (s.kind === 'select') { finish([].slice.call(s.el.options).map(function (o) { return normalize(o.text); }).filter(Boolean)); return; }
+    s.el.click();
+    setTimeout(function () {
+      var opts = nativeElements('[role="option"]').filter(visible).map(function (o) { return normalize(o.innerText); }).filter(Boolean);
+      s.el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+      try { document.activeElement && document.activeElement.blur(); } catch (_) {}
+      finish(opts);
+    }, 180);
+  }
+  function chooseNativeOption(s, text) {
+    if (s.kind === 'select') {
+      var opt = [].slice.call(s.el.options).find(function (o) { return normalize(o.text) === text; });
+      if (opt) { s.el.value = opt.value; s.el.dispatchEvent(new Event('change', {bubbles: true})); }
+      return;
+    }
+    s.el.click();
+    setTimeout(function () {
+      var o = nativeElements('[role="option"]').filter(visible).find(function (x) { return normalize(x.innerText) === text; });
+      if (o) o.click(); else s.el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+      adjustSignature = ''; setTimeout(renderAdjust, 250);
+    }, 180);
+  }
+
+  // Scroll-snap wheel picker. onPick(value) fires when the wheel settles.
+  function buildWheel(values, selected, onPick) {
+    var wrap = document.createElement('div'); wrap.className = 'ptx7-wheel';
+    var list = document.createElement('div'); list.className = 'ptx7-wheel-list';
+    values.forEach(function (v) { var i = document.createElement('div'); i.className = 'ptx7-wheel-item'; i.textContent = v; list.appendChild(i); });
+    wrap.innerHTML = '<div class="ptx7-wheel-band"></div>'; wrap.appendChild(list);
+    var item = 92, index = Math.max(0, values.indexOf(selected)), timer = null;
+    function mark() { [].slice.call(list.children).forEach(function (c, n) { c.classList.toggle('sel', n === index); }); }
+    setTimeout(function () { list.scrollTop = index * item; mark(); }, 0);
+    list.addEventListener('scroll', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        var n = Math.max(0, Math.min(values.length - 1, Math.round(list.scrollTop / item)));
+        if (n !== index) { index = n; mark(); onPick(values[n]); }
+      }, 140);
+    });
+    list.addEventListener('click', function (e) {
+      var n = [].indexOf.call(list.children, e.target); if (n < 0) return;
+      list.scrollTo({top: n * item, behavior: 'smooth'});
+    });
+    return wrap;
+  }
+  function adjustButton(label, cls, handler) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'ptx7-adj-btn ' + (cls || ''); b.textContent = label;
+    b.addEventListener('click', handler); return b;
+  }
+  function forward(pattern) {
+    return function () { var b = dialogButton(pattern); if (b) { b.click(); adjustSignature = ''; setTimeout(renderAdjust, 300); } else showMessage('That PIMS option is not available here.', false); };
+  }
+
+  function stepNumber() {
+    var m = normalize(adjustDialog.innerText).match(/Step\s*(\d)/i);
+    return m ? Number(m[1]) : 1;
+  }
+  function adjustHeader(body) {
+    var text = String(adjustDialog.innerText || '');
+    var prod = inDialog('h1,h2,h3,[role="heading"]').map(function (h) { return normalize(h.innerText); })
+      .find(function (t) { return t && !/Perform Adjustment|^Step\s*\d/i.test(t); }) || '';
+    var ndc = (text.match(/NDC\s*-?\s*(\d{9,14})/i) || [])[1] || '';
+    var summary = (text.match(/\n\s*([A-Za-z][^\n|]{1,40}\|\s*(?:Increase|Decrease)[^\n]*)/) || [])[1] || '';
+    body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-prod">' + esc(prod) + '<small>' + (ndc ? 'NDC ' + esc(ndc) : '') +
+      (summary ? ' \u00b7 ' + esc(normalize(summary)) : '') + '</small></div>');
+  }
+
+  function renderStep1(body) {
+    body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-title">STEP 1 \u00b7 REASON</div>');
+    var tiles = document.createElement('div'); tiles.className = 'ptx7-adj-tiles';
+    var radios = inDialog('input[type="radio"],[role="radio"]');
+    radios.forEach(function (r) {
+      var label = labelFor(r); if (!label) return;
+      var on = r.checked || r.getAttribute('aria-checked') === 'true';
+      var t = adjustButton(label, 'tile' + (on ? ' on' : ''), function () { r.click(); adjustSignature = ''; setTimeout(renderAdjust, 200); });
+      tiles.appendChild(t);
+    });
+    if (radios.length) body.appendChild(tiles);
+    nativeSelects().forEach(function (s) {
+      var wrap = document.createElement('div');
+      wrap.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-label">' + esc(labelFor(s.el) || 'SELECT') + '</div>');
+      body.appendChild(wrap);
+      readListboxOptions(s, function (opts) {
+        if (!opts.length) return;
+        wrap.appendChild(buildWheel(opts, selectValueText(s), function (v) { chooseNativeOption(s, v); }));
+      });
+    });
+    var comment = inDialog('textarea,input[type="text"]').filter(visible)[0];
+    var otherChosen = /\bother\b/i.test(radios.filter(function (r) { return r.checked || r.getAttribute('aria-checked') === 'true'; }).map(labelFor).join(' ') +
+      ' ' + nativeSelects().map(selectValueText).join(' '));
+    if (comment && (otherChosen || comment.tagName === 'TEXTAREA')) {
+      body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-label">COMMENT' + (otherChosen ? ' <span style="color:#b42318">(REQUIRED FOR OTHER)</span>' : '') + '</div>');
+      var box = document.createElement('textarea'); box.className = 'ptx7-adj-comment'; box.value = comment.value || '';
+      box.addEventListener('input', function () { setTextValue(comment, box.value); });
+      body.appendChild(box);
+    }
+    var nav = document.createElement('div'); nav.className = 'ptx7-adj-nav';
+    nav.appendChild(adjustButton('CANCEL', 'ghost', function () { var c = dialogButton(/^(cancel|close)$/i) || adjustNativeDialog().querySelector('[aria-label*="close" i],[aria-label*="dismiss" i]'); if (c) c.click(); }));
+    nav.appendChild(adjustButton('NEXT \u203a', 'primary', function () {
+      if (otherChosen && comment && !normalize(comment.value)) { showMessage('A comment is required when the reason is Other.', false); return; }
+      forward(/^next$/i)();
+    }));
+    body.appendChild(nav);
+  }
+
+  function renderStep2(body) {
+    body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-title">STEP 2 \u00b7 STOCK LOCATIONS</div>');
+    var locInputs = inDialog('input').filter(visible).filter(function (i) { return /location/i.test(labelFor(i)); });
+    var areas = nativeSelects();
+    locInputs.forEach(function (native, idx) {
+      var card = document.createElement('div'); card.className = 'ptx7-adj-card';
+      card.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-label">LOCATION ' + (locInputs.length > 1 ? idx + 1 : '') + '</div>');
+      var scan = document.createElement('input'); scan.type = 'text'; scan.className = 'ptx7-adj-scan'; scan.setAttribute('inputmode', 'none');
+      scan.setAttribute('autocomplete', 'off'); scan.value = native.value || '';
+      var timer = null;
+      function push() { setTextValue(native, scan.value.trim()); pressEnter(native); }
+      scan.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(push, 200); });
+      scan.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); clearTimeout(timer); push(); } });
+      card.appendChild(scan);
+      var area = areas[idx];
+      if (area) {
+        card.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-label">AREA</div>');
+        var holder = document.createElement('div'); card.appendChild(holder);
+        readListboxOptions(area, function (opts) {
+          var list = opts.length ? opts : KNOWN_AREAS;
+          holder.appendChild(buildWheel(list, selectValueText(area), function (v) { chooseNativeOption(area, v); }));
+        });
+      }
+      body.appendChild(card);
+      if (idx === 0) setTimeout(function () { try { scan.focus({preventScroll: true}); } catch (_) {} }, 60);
+    });
+    body.appendChild(adjustButton('+ ADD STOCK LOCATION', 'ghost wide', forward(/^add stock location$/i)));
+    body.appendChild(adjustButton("I DON'T KNOW THE LOCATIONS", 'ghost wide', forward(/don.?t know the locations/i)));
+    var nav = document.createElement('div'); nav.className = 'ptx7-adj-nav';
+    nav.appendChild(adjustButton('\u2039 BACK', 'ghost', forward(/^back$/i)));
+    nav.appendChild(adjustButton('NEXT \u203a', 'primary', forward(/^next$/i)));
+    body.appendChild(nav);
+  }
+
+  function renderStep3(body) {
+    body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-title">STEP 3 \u00b7 SCAN PACKAGES</div>');
+    var total = (String(adjustDialog.innerText).match(/(Decreasing|Increasing) total inventory by[^\n]*/i) || [])[0] || '';
+    if (total) body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-total">' + esc(total) + '</div>');
+    body.insertAdjacentHTML('beforeend', '<div class="ptx7-adj-hint">Scan 2D barcodes now, or set quantities below.</div>');
+    var rows = inDialog('tbody tr,[role="row"]').filter(function (r) { return r.querySelector('td,[role="cell"],[role="gridcell"]'); });
+    rows.forEach(function (row) {
+      var cells = [].slice.call(row.querySelectorAll(':scope > td,:scope > [role="cell"],:scope > [role="gridcell"]'));
+      var texts = cells.map(function (c) { return normalize(c.innerText); });
+      var radio = row.querySelector('input[type="radio"],[role="radio"]');
+      var on = radio && (radio.checked || radio.getAttribute('aria-checked') === 'true');
+      var num = function (t) { var m = String(t || '').match(/-?\d+(?:\.\d+)?/); return m ? m[0] : '0'; };
+      var area = texts[1] || '', current = num(texts[2]), change = num(texts[3]), updated = num(texts[4]);
+      var card = document.createElement('div'); card.className = 'ptx7-adj-card' + (on ? ' on' : '');
+      card.innerHTML = '<div class="ptx7-adj-area">' + (on ? '\u25C9 ' : '\u25CB ') + esc(area) + '</div>' +
+        '<div class="ptx7-adj-qty"><div><small>CURRENT</small>' + esc(current) + '</div><div><small>CHANGE</small><b>' + esc(change) + '</b></div><div><small>UPDATED</small>' + esc(updated) + '</div></div>';
+      if (radio) card.querySelector('.ptx7-adj-area').addEventListener('click', function () { radio.click(); adjustSignature = ''; setTimeout(renderAdjust, 250); });
+      var max = Math.max(0, Math.ceil(Number(String(current).replace(/[^\d.]/g, '')) || 0));
+      var values = []; for (var n = 0; n <= Math.min(max || 50, 500); n++) values.push(String(n));
+      var pencil = row.querySelector('button,[role="button"]');
+      card.appendChild(buildWheel(values, String(Number(change) || 0), function (v) {
+        if (pencil) pencil.click();
+        setTimeout(function () {
+          var input = row.querySelector('input:not([type="radio"])');
+          if (input) { setTextValue(input, v); pressEnter(input); try { input.blur(); } catch (_) {} }
+          adjustSignature = ''; setTimeout(renderAdjust, 350);
+        }, 150);
+      }));
+      body.appendChild(card);
+    });
+    body.appendChild(adjustButton('BOTTLES NOT AVAILABLE', 'ghost wide', forward(/bottles not available/i)));
+    var nav = document.createElement('div'); nav.className = 'ptx7-adj-nav';
+    nav.appendChild(adjustButton('\u2039 BACK', 'ghost', forward(/^back$/i)));
+    nav.appendChild(adjustButton('ADJUST INVENTORY', 'danger', function () {
+      var go = dialogButton(/^adjust inventory$/i);
+      if (!go) { showMessage('PIMS Adjust Inventory is not available yet.', false); return; }
+      var sheet = document.createElement('div'); sheet.className = 'ptx7-adj-confirm';
+      sheet.innerHTML = '<div class="box"><h2>SUBMIT ADJUSTMENT?</h2><p>' + esc(total || 'Review quantities before submitting.') + '</p>' +
+        '<div class="ptx7-adj-nav"><button type="button" class="ptx7-adj-btn ghost">BACK</button><button type="button" class="ptx7-adj-btn danger">SUBMIT</button></div></div>';
+      sheet.querySelector('.ghost').addEventListener('click', function () { sheet.remove(); });
+      sheet.querySelector('.danger').addEventListener('click', function () { sheet.remove(); go.click(); });
+      adjustRoot.appendChild(sheet);
+    }));
+    body.appendChild(nav);
+    // Step 3 listens for 2D scans on the PIMS page itself: keep focus off our inputs.
+    try { if (document.activeElement && adjustRoot.contains(document.activeElement)) document.activeElement.blur(); } catch (_) {}
+  }
+
+  function renderAdjust() {
+    if (!adjustActive) return;
+    adjustDialog = adjustNativeDialog();
+    if (!adjustDialog) { adjustRoot.style.display = 'none'; return; }
+    adjustRoot.style.display = 'flex';
+    var step = stepNumber();
+    var sig = step + '|' + inDialog('input,select,textarea,[role="radio"],[aria-haspopup="listbox"],tbody tr').length + '|' +
+      inDialog('input[type="radio"],[role="radio"]').map(function (r) { return r.checked || r.getAttribute('aria-checked'); }).join('') + '|' +
+      inDialog('tbody tr').map(function (r) { return normalize(r.innerText); }).join(';') + '|' + nativeSelects().map(selectValueText).join(';');
+    if (sig === adjustSignature) return;
+    adjustSignature = sig;
+    adjustRoot.innerHTML = '<header class="ptx7-adj-head">ADJUST INVENTORY<button type="button" class="ptx7-adj-pims">PIMS FORM</button></header>';
+    var body = document.createElement('main'); body.className = 'ptx7-adj-body'; adjustRoot.appendChild(body);
+    adjustRoot.querySelector('.ptx7-adj-pims').addEventListener('click', function () {
+      adjustActive = false; adjustRoot.style.display = 'none'; document.documentElement.classList.add('ptx7-native-action');
+    });
+    adjustHeader(body);
+    if (step === 2) renderStep2(body); else if (step === 3) renderStep3(body); else renderStep1(body);
+  }
+  function openAdjustSkin() {
+    adjustActive = true; adjustSignature = '';
+    setTimeout(renderAdjust, 250); setTimeout(renderAdjust, 700);
+  }
+  function closeAdjustSkin() { optionCache = {}; adjustActive = false; adjustSignature = ''; adjustRoot.style.display = 'none'; adjustRoot.innerHTML = ''; }
+
   function showNativeInventory(targetLabel) {
     var target = targetLabel ? nativeButton(targetLabel) : null;
     if (targetLabel && !target) {
@@ -586,10 +1158,12 @@
     nativeActionActive = !!target;
     nativeDialogSeen = false;
     nativeActionStartedAt = Date.now();
-    document.documentElement.classList.toggle('ptx7-native-action', nativeActionActive);
+    var adjusting = /adjust inventory/i.test(targetLabel || '') && !!target;
+    document.documentElement.classList.toggle('ptx7-native-action', nativeActionActive && !adjusting);
     inventoryRoot.style.display = 'none';
     fullButton.textContent = 'RETURN TO SIMPLE INVENTORY';
-    fullButton.style.display = 'block';
+    fullButton.style.display = adjusting ? 'none' : 'block';
+    if (adjusting) openAdjustSkin();
     // This is the user's one tap, forwarded to the public native PIMS control.
     // No React internals or private handlers are invoked.
     if (target) setTimeout(function () { if (document.documentElement.contains(target)) target.click(); }, 0);
@@ -680,6 +1254,7 @@
   });
 
   function returnToSimple(mode) {
+    closeAdjustSkin();
     nativeActionActive = false;
     nativeDialogSeen = false;
     document.documentElement.classList.remove('ptx7-native-action');
@@ -695,6 +1270,7 @@
   function standDown() {
     inventoryRoot.style.display = 'none';
     locationRoot.style.display = 'none';
+    adjustRoot.style.display = 'none';
     fullButton.style.display = 'none';
     receivePoButton.style.display = 'none';
     document.documentElement.classList.remove('ptx7-simple-pims');
@@ -714,6 +1290,7 @@
     // on the PO page, or while a native dialog has its own styling.
     var enlarged = (mode === 'inventory' || mode === 'locations') && !nativeActionActive;
     document.documentElement.classList.toggle('ptx7-simple-pims', enlarged);
+    if (adjustActive) { fullButton.style.display = 'none'; renderAdjust(); }
     inventoryRoot.style.display = mode === 'inventory' && inventorySimple ? 'flex' : 'none';
     locationRoot.style.display = mode === 'locations' && locationsSimple ? 'flex' : 'none';
     receivePoButton.style.display = mode === 'po' ? 'block' : 'none';
@@ -739,6 +1316,8 @@
     if (!document.documentElement.contains(receivePoButton)) document.body.appendChild(receivePoButton);
     if (!document.documentElement.contains(message)) document.body.appendChild(message);
     if (!document.documentElement.contains(removeConfirm)) document.body.appendChild(removeConfirm);
+    if (!document.documentElement.contains(adjustRoot)) document.body.appendChild(adjustRoot);
+    if (adjustActive) fullButton.style.display = 'none';
   }
 
   new MutationObserver(function (mutations) {
