@@ -340,7 +340,9 @@
   function buddyMessage(codes) {
     if (!codes.length) return 'No location assigned.';
     var spoken = codes.map(spokenCode);
-    var text = codes.length === 1 ? 'Location. ' + spoken[0] + '.' : codes.length + ' locations. ' + spoken.join('. Then, ') + '.';
+    // Numbered, no transitional words: "Location 1. ... Location 2. ..."
+    var text = codes.length === 1 ? 'Location. ' + spoken[0] + '.' :
+      spoken.map(function (v, i) { return 'Location ' + (i + 1) + '. ' + v + '.'; }).join(' ');
     return pref(BUDDY_REPEAT, '1') === '2' ? text + ' Again. ' + text : text;
   }
   function buddySpeak(text) {
@@ -1368,7 +1370,17 @@
     return false;
   }
 
-  window.__ptx7PimsTools = {onHostScan:onHostScan, handleBack:handleBack, showInventory:function () {
+  // Readiness acknowledgement for native transitions: true only when the
+  // requested simplified interface and its styles are installed and showing.
+  function isReady(route) {
+    if (receivingOpen() || !document.getElementById('ptx7-pims-tools-style')) return false;
+    maintain();
+    var mode = currentMode();
+    if (route === 'inventory') return mode === 'inventory' && inventorySimple && inventoryRoot.style.display === 'flex';
+    if (route === 'locations') return mode === 'locations' && locationsSimple && locationRoot.style.display === 'flex';
+    return false;
+  }
+  window.__ptx7PimsTools = {isReady:isReady, onHostScan:onHostScan, handleBack:handleBack, showInventory:function () {
     inventorySimple = true;
     nativeActionActive = false;
     document.documentElement.classList.remove('ptx7-native-action');

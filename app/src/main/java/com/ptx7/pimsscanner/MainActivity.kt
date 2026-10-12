@@ -274,6 +274,7 @@ class MainActivity : ComponentActivity() {
         // controls can call the host even if Receiving has not been opened yet.
         registerReceivingBridge()
         initTts()
+        buildTransitionCover()
         findViewById<Button>(R.id.copyButton).setOnClickListener { copyLastScan() }
         findViewById<Button>(R.id.openChromeButton).setOnClickListener { openPimsExternally() }
         findViewById<Button>(R.id.loadIntegratedButton).setOnClickListener { loadIntegratedPims() }
@@ -965,6 +966,35 @@ class MainActivity : ComponentActivity() {
                 }
 
 
+                override fun onPageStarted(
+                    view: WebView?,
+                    url: String?,
+                    favicon: android.graphics.Bitmap?
+                ) {
+                    super.onPageStarted(view, url, favicon)
+                    pageStartSeq += 1
+                    if (transitionActive()) {
+                        if (activeNeedsLoad) activeDocLoaded = false
+                        logTransition("pageStarted")
+                    } else {
+                        // Navigations started inside PIMS (e.g. choosing a PO
+                        // from Receiving) get the same cover.
+                        val route = if (receivingModeOpen) routeForUrl(url) else null
+                        if (route != null) beginTransition(route, true, null)
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                    error: android.webkit.WebResourceError?
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame == true && transitionActive()) {
+                        failTransition(activeNavId, "could not load (${error?.description ?: "network error"})")
+                    }
+                }
+
                 override fun onPageFinished(
 
                     view: WebView?,
@@ -980,9 +1010,12 @@ class MainActivity : ComponentActivity() {
                         url
                     )
 
+                    val finishedSeq = pageStartSeq
+
 
                     applyLoginPresentation(url) { isLogin ->
                         if (isLogin) {
+                            if (transitionActive()) endTransition("login")
                             statusText.text = "Sign in to PIMS"
                         } else {
                             statusText.text = "Integrated PIMS loaded"
@@ -998,6 +1031,11 @@ class MainActivity : ComponentActivity() {
                                 installReceivingMode()
                                 installPimsWorkflowTools()
                                 focusWebView()
+                                if (transitionActive() && finishedSeq == pageStartSeq) {
+                                    activeDocLoaded = true
+                                    stampDocument(activeNavId)
+                                    logTransition("pageFinished+installed")
+                                }
 
                                 // PO Search always starts from PIMS Inventory,
                                 // after that destination has finished loading.
@@ -1033,6 +1071,10 @@ class MainActivity : ComponentActivity() {
 
                     lastKnownWebScale =
                         newScale
+
+                    if (transitionActive()) {
+                        Log.d("PTX7Transition", "nav=$activeNavId onScaleChanged $oldScale -> $newScale")
+                    }
 
 
                     /*
@@ -1168,6 +1210,11 @@ class MainActivity : ComponentActivity() {
      * naturally from there.
      */
     private fun enablePimsPinchZoom() {
+
+        // Transitions stay covered until the viewport change and the zoom
+        // to minimum overview below have fully settled.
+        zoomSettling = true
+        webView.postDelayed({ zoomSettling = false }, 4000)
 
         val virtualWidth =
 
@@ -1377,6 +1424,7 @@ class MainActivity : ComponentActivity() {
             remainingSteps <= 0
         ) {
 
+            zoomSettling = false
             webView.scrollTo(
                 0,
                 0
@@ -1390,6 +1438,7 @@ class MainActivity : ComponentActivity() {
             !webView.canZoomOut()
         ) {
 
+            zoomSettling = false
             webView.scrollTo(
                 0,
                 0
@@ -1418,6 +1467,7 @@ class MainActivity : ComponentActivity() {
 
         } else {
 
+            zoomSettling = false
             webView.scrollTo(
                 0,
                 0
@@ -2545,6 +2595,7 @@ class MainActivity : ComponentActivity() {
 
         statusText.text = "Loading integrated PIMS..."
         webView.visibility = View.VISIBLE
+        routeForUrl(url)?.let { beginTransition(it, true) { loadIntegratedPims() } }
         webView.loadUrl(url)
     }
 
@@ -2817,6 +2868,210 @@ class MainActivity : ComponentActivity() {
     private var receivingModeInstalled = false
     private var pendingReceivingSearch = false
 
+    // ------------------------------------------------------------------
+    // Workflow transitions: a native cover hides the raw PIMS document while
+    // it loads, applies the wide viewport, settles zoom, and installs the
+    // simplified interface. It is revealed only after JavaScript confirms
+    // the destination interface for the current navigation ID is ready and
+    // WebView has drawn that state (postVisualStateCallback).
+    // ------------------------------------------------------------------
+    private lateinit var transitionCover: android.widget.FrameLayout
+    private lateinit var coverSpinner: android.widget.ProgressBar
+    private lateinit var coverMessage: TextView
+    private lateinit var coverDetail: TextView
+    private lateinit var coverActions: android.widget.LinearLayout
+    private var navSeq = 0L
+    private var activeNavId = 0L
+    private var activeRoute = ""
+    private var activeNeedsLoad = false
+    private var activeDocLoaded = false
+    private var activeStartedAt = 0L
+    private var activeRetry: (() -> Unit)? = null
+    @Volatile private var zoomSettling = false
+    // Incremented on every document start so a late onPageFinished from a
+    // superseded load can never mark the new navigation as loaded.
+    private var pageStartSeq = 0L
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun buildTransitionCover() {
+        val parent = webView.parent as android.view.ViewGroup
+        transitionCover = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#F6F8F9"))
+            // Blocks taps on half-loaded raw PIMS but never takes focus, so
+            // hardware scanner key events keep their normal routing.
+            isClickable = true
+            isFocusable = false
+            isFocusableInTouchMode = false
+            visibility = View.GONE
+        }
+        val column = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+        }
+        coverSpinner = android.widget.ProgressBar(this).apply { isIndeterminate = true }
+        coverMessage = TextView(this).apply {
+            textSize = 24f
+            setTextColor(android.graphics.Color.parseColor("#172B3A"))
+            gravity = android.view.Gravity.CENTER
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(18), 0, dp(6))
+        }
+        coverDetail = TextView(this).apply {
+            textSize = 15f
+            setTextColor(android.graphics.Color.parseColor("#59636B"))
+            gravity = android.view.Gravity.CENTER
+        }
+        coverActions = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
+            setPadding(0, dp(22), 0, 0)
+        }
+        fun coverButton(label: String, onTap: () -> Unit) = Button(this).apply {
+            text = label
+            textSize = 20f
+            isFocusable = false
+            isFocusableInTouchMode = false
+            minHeight = dp(64)
+            minWidth = dp(150)
+            setOnClickListener { onTap() }
+        }
+        coverActions.addView(coverButton("RETRY") {
+            val retry = activeRetry
+            if (retry != null) retry() else { endTransition("retry-none"); loadIntegratedPims() }
+        })
+        coverActions.addView(android.widget.Space(this), android.widget.LinearLayout.LayoutParams(dp(16), 1))
+        coverActions.addView(coverButton("VIEW PIMS") { endTransition("view-pims") })
+        column.addView(coverSpinner)
+        column.addView(coverMessage)
+        column.addView(coverDetail)
+        column.addView(coverActions)
+        transitionCover.addView(column, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        // Directly above the WebView, below the workflow bar: the bar stays
+        // visible and the WebView keeps its exact size.
+        val lp = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        ).apply { bottomMargin = dp(84) }
+        parent.addView(transitionCover, parent.indexOfChild(webView) + 1, lp)
+    }
+
+    private fun transitionActive(): Boolean =
+        ::transitionCover.isInitialized && activeNavId != 0L && transitionCover.visibility == View.VISIBLE
+
+    private fun routeForUrl(url: String?): String? {
+        val u = url ?: return null
+        if (!u.contains("console.inventory.pharmacy.amazon.dev", ignoreCase = true)) return null
+        return when {
+            pendingReceivingSearch -> "receiving"
+            u.contains("/locations", ignoreCase = true) -> "locations"
+            u.contains("/inventory", ignoreCase = true) -> "inventory"
+            receivingModeOpen -> "receiving"
+            else -> null
+        }
+    }
+
+    private fun routeLabel(route: String): String = when (route) {
+        "inventory" -> "Inventory"
+        "locations" -> "Locations"
+        else -> "PO Search / Receive"
+    }
+
+    private fun beginTransition(route: String, needsLoad: Boolean, retry: (() -> Unit)?) {
+        if (!::transitionCover.isInitialized) return
+        navSeq += 1
+        val id = navSeq
+        activeNavId = id
+        activeRoute = route
+        activeNeedsLoad = needsLoad
+        activeDocLoaded = !needsLoad
+        activeStartedAt = SystemClock.elapsedRealtime()
+        activeRetry = retry
+        coverSpinner.visibility = View.VISIBLE
+        coverActions.visibility = View.GONE
+        coverMessage.text = "Opening ${routeLabel(route)}\u2026"
+        coverDetail.text = ""
+        transitionCover.visibility = View.VISIBLE
+        logTransition("begin load=$needsLoad")
+        if (!needsLoad) stampDocument(id)
+        pollReady(id)
+        val timeout = if (route == "receiving") 20000L else 12000L
+        webView.postDelayed({ if (activeNavId == id && transitionActive()) failTransition(id, "timed out") }, timeout)
+    }
+
+    private fun stampDocument(id: Long) {
+        webView.evaluateJavascript("window.__ptx7DocNav=$id;", null)
+    }
+
+    private fun pollReady(id: Long) {
+        if (id != activeNavId || !transitionActive()) return
+        if ((activeNeedsLoad && !activeDocLoaded) || zoomSettling) {
+            webView.postDelayed({ pollReady(id) }, 120)
+            return
+        }
+        val route = activeRoute
+        val probe = "(function(){" +
+            "if(window.__ptx7DocNav!==$id)return 'stale';" +
+            "if('$route'==='receiving')return (window.__ptx7Rx&&window.__ptx7Rx.isOpen&&window.__ptx7Rx.isOpen())?'ready':'wait';" +
+            "return (window.__ptx7PimsTools&&window.__ptx7PimsTools.isReady&&window.__ptx7PimsTools.isReady('$route'))?'ready':'wait';" +
+            "})()"
+        webView.evaluateJavascript(probe) { result ->
+            if (id == activeNavId && transitionActive()) {
+                if (result?.contains("ready") == true) revealWhenDrawn(id)
+                else webView.postDelayed({ pollReady(id) }, 120)
+            }
+        }
+    }
+
+    private fun revealWhenDrawn(id: Long) {
+        logTransition("ready")
+        webView.postVisualStateCallback(id, object : WebView.VisualStateCallback() {
+            override fun onComplete(requestId: Long) {
+                runOnUiThread {
+                    if (requestId == activeNavId && transitionActive()) endTransition("revealed")
+                }
+            }
+        })
+        // Safety net only if WebView never reports the drawn state.
+        webView.postDelayed({ if (activeNavId == id && transitionActive()) endTransition("revealed-fallback") }, 1500)
+    }
+
+    private fun failTransition(id: Long, reason: String) {
+        if (id != activeNavId || !transitionActive()) return
+        logTransition("failed $reason")
+        coverSpinner.visibility = View.GONE
+        coverMessage.text = "${routeLabel(activeRoute)} didn't open"
+        coverDetail.text = "PIMS $reason. Retry, or view the PIMS page as it is."
+        coverActions.visibility = View.VISIBLE
+    }
+
+    private fun endTransition(reason: String) {
+        if (!::transitionCover.isInitialized) return
+        if (activeNavId != 0L) logTransition("end $reason")
+        activeNavId = 0L
+        activeRetry = null
+        transitionCover.visibility = View.GONE
+        focusWebView()
+    }
+
+    private fun logTransition(event: String) {
+        val elapsed = if (activeStartedAt > 0) SystemClock.elapsedRealtime() - activeStartedAt else 0
+        @Suppress("DEPRECATION")
+        val base = "nav=$activeNavId route=$activeRoute +${elapsed}ms $event scale=${webView.scale} " +
+            "view=${webView.width}x${webView.height} zoomSettling=$zoomSettling"
+        webView.evaluateJavascript(
+            "(function(){var a=document.activeElement,m=document.querySelector('meta[name=\"viewport\"]');" +
+                "return JSON.stringify({path:location.pathname,iw:innerWidth,ih:innerHeight," +
+                "vv:window.visualViewport?visualViewport.scale:null,meta:m?m.content:'',doc:window.__ptx7DocNav||0," +
+                "active:a?(a.tagName+'#'+(a.id||'')):''});})()"
+        ) { js -> Log.d("PTX7Transition", "$base js=$js") }
+    }
+
     private fun readAsset(name: String): String {
         return try {
             assets.open(name).bufferedReader().use { it.readText() }
@@ -2855,8 +3110,10 @@ class MainActivity : ComponentActivity() {
         """.trimIndent()
         webView.evaluateJavascript(receivingPageCheck) { result ->
             runOnUiThread {
-                if (result?.contains("true") == true) openReceivingMode()
-                else startNewPoSearch()
+                if (result?.contains("true") == true) {
+                    beginTransition("receiving", false) { openPoSearchOrReceive() }
+                    openReceivingMode()
+                } else startNewPoSearch()
             }
         }
     }
@@ -2872,6 +3129,14 @@ class MainActivity : ComponentActivity() {
         assistantOwnsScanNative = true
         scanBuffer.setLength(0)
         statusText.text = "Opening PIMS workflow..."
+        val route = routeForUrl(url)
+        if (route != null) {
+            val receiving = pendingReceivingSearch
+            beginTransition(route, true) {
+                if (receiving) pendingReceivingSearch = true
+                openPimsWorkflow(url)
+            }
+        }
         webView.loadUrl(url)
     }
 

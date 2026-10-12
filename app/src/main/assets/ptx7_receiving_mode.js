@@ -651,9 +651,9 @@
   // Audio feedback (Web Audio, no assets)
   // ---------------------------------------------------------------------------
   var audioCtx = null;
-  var SOUND_STYLE_KEY = 'ptx7_rx_sound_style';
+  var SOUND_STYLE_KEY = 'ptx7_rx_sound_style_v2';
   var SOUND_VOLUME_KEY = 'ptx7_rx_sound_volume';
-  function soundStyle(){ try{return localStorage.getItem(SOUND_STYLE_KEY)||'gentle';}catch(e){return 'gentle';} }
+  function soundStyle(){ try{return localStorage.getItem(SOUND_STYLE_KEY)||'muted';}catch(e){return 'muted';} }
   function soundVolume(){ var value='low';try{value=localStorage.getItem(SOUND_VOLUME_KEY)||'low';}catch(e){}return {low:0.006,medium:0.014,high:0.03}[value]||0.006; }
   function tone(ok) {
     try {
@@ -699,13 +699,13 @@
       if(!force&&!voiceEnabled())return;
       var nativeList=(locations||[]).filter(Boolean);
       try{if(nativeList.length&&window.PTX7Host&&window.PTX7Host.speak&&(!window.PTX7Host.ttsAvailable||window.PTX7Host.ttsAvailable())){
-        var nativeText=nativeList.length===1?spokenLocation(nativeList[0]):'Multiple valid locations. '+nativeList.map(spokenLocation).join('. ');
+        var nativeText=nativeList.length===1?spokenLocation(nativeList[0]):nativeList.map(function(l,i){return 'Location '+(i+1)+'. '+spokenLocation(l)+'.';}).join(' ');
         var nativeVoice='';try{nativeVoice=localStorage.getItem('ptx7_buddy_voice')||'';}catch(_){}
         window.PTX7Host.speak(nativeText,voiceRate(),nativeVoice);return;}}catch(_){}
       if(!window.speechSynthesis)return;
       var list=(locations||[]).filter(Boolean);if(!list.length)return;
       window.speechSynthesis.cancel();
-      var text=list.length===1?spokenLocation(list[0]):'Multiple valid locations. '+list.map(spokenLocation).join('. ');
+      var text=list.length===1?spokenLocation(list[0]):list.map(function(l,i){return 'Location '+(i+1)+'. '+spokenLocation(l)+'.';}).join(' ');
       var utterance=new SpeechSynthesisUtterance(text);utterance.rate=voiceRate();var voice=selectedVoice();if(voice)utterance.voice=voice;
       window.speechSynthesis.speak(utterance);
     }catch(e){}
@@ -747,7 +747,7 @@
   settings.id='ptx7-rx-settings';
   settings.style.cssText='position:fixed;inset:112px 0 84px;z-index:20;display:none;background:#fff;padding:34px;overflow:auto;font:900 34px Arial;color:#172b3a';
   settings.innerHTML='<h2 style="font-size:56px;margin:0 0 26px;border-bottom:5px solid #007a83;padding-bottom:14px">TOOLS / SETTINGS</h2>'+
-    '<label style="display:block;margin:22px 0">SCAN TONES <select id="ptx7-sound-style" style="width:100%;height:88px;font-size:32px"><option value="gentle">GENTLE CHIME (DEFAULT)</option><option value="standard">STANDARD BEEP</option><option value="muted">MUTED</option></select></label>'+
+    '<label style="display:block;margin:22px 0">SCAN TONES <select id="ptx7-sound-style" style="width:100%;height:88px;font-size:32px"><option value="muted">OFF (DEFAULT)</option><option value="gentle">GENTLE CHIME</option><option value="standard">STANDARD BEEP</option></select></label>'+
     '<label style="display:block;margin:22px 0">TONE VOLUME <select id="ptx7-sound-volume" style="width:100%;height:88px;font-size:32px"><option value="low">LOW (DEFAULT)</option><option value="medium">MEDIUM</option><option value="high">HIGH</option></select></label>'+
     '<button id="ptx7-tone-preview" class="ptx7-rx-btn ghost">♪ PREVIEW TONE</button>'+
     '<label style="display:block;margin:22px 0">LOCATION VOICE <select id="ptx7-voice-on" style="width:100%;height:88px;font-size:32px"><option value="on">ON</option><option value="off">MUTED</option></select></label>'+
