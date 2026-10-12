@@ -798,8 +798,8 @@ class MainActivity : ComponentActivity() {
               var route=String(location.pathname||'').toLowerCase();
               var text=String((document.body&&document.body.innerText)||'').slice(0,5000);
               var hasPassword=!!document.querySelector('input[type="password"]');
-              var authUrl=/midway|signin|login|sso|authenticate|oauth/.test(host+route+suppliedUrl.toLowerCase());
-              var authWords=/sign in|log in|authenticate|continue to|use your security key/i.test(text);
+              var authUrl=/midway|okta|signin|login|sso|authenticate|oauth/.test(host+route+suppliedUrl.toLowerCase());
+              var authWords=/sign in|log in|authenticate|continue to|use your security key|fastpass|okta verify/i.test(text);
               var isPims=/console\.inventory\.pharmacy\.amazon\.dev/.test(host);
               var isLogin=hasPassword||authUrl||(!isPims&&authWords);
               if(!isLogin)return false;
@@ -944,9 +944,15 @@ class MainActivity : ComponentActivity() {
                     val uri = request?.url ?: return false
                     val scheme = (uri.scheme ?: "").lowercase()
                     if (scheme == "http" || scheme == "https") {
+                        // Okta FastPass on Android launches Okta Verify through an
+                        // https app link. A WebView never follows app links, so hand
+                        // Okta links to an installed non-browser app when one claims
+                        // them; otherwise keep loading normally in the WebView.
+                        if (launchOktaAppLink(uri)) return true
                         return false // let the WebView load it normally
                     }
                     return try {
+                        if (transitionActive()) endTransition("external-sign-in")
                         if (scheme == "intent") {
                             // Resolve intent:// targets to a real Intent.
                             val intent = Intent.parseUri(
@@ -973,6 +979,12 @@ class MainActivity : ComponentActivity() {
                 ) {
                     super.onPageStarted(view, url, favicon)
                     pageStartSeq += 1
+                    // Never cover sign-in: the moment navigation leaves PIMS
+                    // (Okta, Midway, FastPass), drop the cover and let it show.
+                    if (transitionActive() && !isPimsUrl(url)) {
+                        endTransition("sign-in page")
+                        return
+                    }
                     if (transitionActive()) {
                         if (activeNeedsLoad) activeDocLoaded = false
                         logTransition("pageStarted")
@@ -990,7 +1002,7 @@ class MainActivity : ComponentActivity() {
                     error: android.webkit.WebResourceError?
                 ) {
                     super.onReceivedError(view, request, error)
-                    if (request?.isForMainFrame == true && transitionActive()) {
+                    if (request?.isForMainFrame == true && transitionActive() && isPimsUrl(request.url?.toString())) {
                         failTransition(activeNavId, "could not load (${error?.description ?: "network error"})")
                     }
                 }
@@ -2964,6 +2976,9 @@ class MainActivity : ComponentActivity() {
     private fun transitionActive(): Boolean =
         ::transitionCover.isInitialized && activeNavId != 0L && transitionCover.visibility == View.VISIBLE
 
+    private fun isPimsUrl(url: String?): Boolean =
+        url?.contains("console.inventory.pharmacy.amazon.dev", ignoreCase = true) == true
+
     private fun routeForUrl(url: String?): String? {
         val u = url ?: return null
         if (!u.contains("console.inventory.pharmacy.amazon.dev", ignoreCase = true)) return null
@@ -3089,6 +3104,25 @@ class MainActivity : ComponentActivity() {
         webView.post {
             webView.isFocusableInTouchMode = true
             webView.requestFocus(View.FOCUS_DOWN)
+        }
+    }
+
+    private fun launchOktaAppLink(uri: Uri): Boolean {
+        val host = (uri.host ?: "").lowercase()
+        if (!host.contains("okta")) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                // Only a native app (Okta Verify), never a browser.
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
+            }
+            startActivity(intent)
+            if (transitionActive()) endTransition("okta-verify")
+            Log.d(TAG, "Okta app link handed to native app: $host")
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            false
         }
     }
 
