@@ -11,8 +11,26 @@ android {
         applicationId = "com.ptx7.pimsscanner"
         minSdk = 23
         targetSdk = 35
-        versionCode = 46
-        versionName = "2.0.0-beta.17"
+        versionCode = 47
+        versionName = "2.0.0-beta.18"
+    }
+
+    // One permanent signing key for every CI build. Without it, GitHub creates a
+    // new throwaway key per build, so updates cannot install over the old app;
+    // the required uninstall wipes the saved Okta / FastPass sign-in.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("ptx7-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
