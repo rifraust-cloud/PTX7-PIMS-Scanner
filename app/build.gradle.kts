@@ -11,8 +11,8 @@ android {
         applicationId = "com.ptx7.pimsscanner"
         minSdk = 23
         targetSdk = 35
-        versionCode = 47
-        versionName = "2.0.0-beta.18"
+        versionCode = 48
+        versionName = "2.0.0-beta.19"
     }
 
     // One permanent signing key for every CI build. Without it, GitHub creates a
