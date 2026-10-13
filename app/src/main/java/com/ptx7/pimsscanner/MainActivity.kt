@@ -944,11 +944,8 @@ class MainActivity : ComponentActivity() {
                     val uri = request?.url ?: return false
                     val scheme = (uri.scheme ?: "").lowercase()
                     if (scheme == "http" || scheme == "https") {
-                        // Okta FastPass on Android launches Okta Verify through an
-                        // https app link. A WebView never follows app links, so hand
-                        // Okta links to an installed non-browser app when one claims
-                        // them; otherwise keep loading normally in the WebView.
-                        if (launchOktaAppLink(uri)) return true
+                        // All web pages, including Okta / pillpack-idp sign-in,
+                        // stay inside the app exactly as in earlier working builds.
                         return false // let the WebView load it normally
                     }
                     return try {
@@ -3104,25 +3101,6 @@ class MainActivity : ComponentActivity() {
         webView.post {
             webView.isFocusableInTouchMode = true
             webView.requestFocus(View.FOCUS_DOWN)
-        }
-    }
-
-    private fun launchOktaAppLink(uri: Uri): Boolean {
-        val host = (uri.host ?: "").lowercase()
-        if (!host.contains("okta")) return false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                // Only a native app (Okta Verify), never a browser.
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
-            }
-            startActivity(intent)
-            if (transitionActive()) endTransition("okta-verify")
-            Log.d(TAG, "Okta app link handed to native app: $host")
-            true
-        } catch (e: android.content.ActivityNotFoundException) {
-            false
         }
     }
 
