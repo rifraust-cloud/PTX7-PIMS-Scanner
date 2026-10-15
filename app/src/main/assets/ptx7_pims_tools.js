@@ -33,6 +33,61 @@
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // MULTI-LOCATION REVIEW (beta21)
+  // When an item is received with more than one suggested location, the
+  // receiving overlay flags its NDC here. Flags are stored locally on the
+  // device, grouped by calendar day, and surfaced in the Locations view where
+  // each flagged location is a link into the existing REMOVE flow for cleanup.
+  // ---------------------------------------------------------------------------
+  var MULTILOC_KEY = 'ptx7_multiloc_flags_v1';
+  function mlDigits(v){ return String(v==null?'':v).replace(/\D/g,''); }
+  function mlToday(){
+    var d=new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  function mlLoad(){
+    try { var raw=JSON.parse(localStorage.getItem(MULTILOC_KEY)||'{}'); return (raw&&typeof raw==='object')?raw:{}; }
+    catch(e){ return {}; }
+  }
+  function mlSave(store){ try{ localStorage.setItem(MULTILOC_KEY, JSON.stringify(store)); }catch(e){} }
+  // Record a multi-location NDC for today. Dedupes per NDC per day; refreshes
+  // the timestamp and merges any newly-seen locations.
+  function mlFlag(ndc, drug, locations){
+    var locs=(locations||[]).map(function(l){return String(l||'').trim().toUpperCase();}).filter(Boolean);
+    locs=locs.filter(function(l,i){return locs.indexOf(l)===i;});
+    if(locs.length<2) return false;           // only multi-location items
+    var key=mlDigits(ndc)||String(ndc||'').trim();
+    if(!key) return false;
+    var store=mlLoad(); var day=mlToday();
+    if(!store[day]) store[day]={};
+    var existing=store[day][key];
+    if(existing){
+      existing.at=Date.now();
+      existing.drug=existing.drug||drug||'';
+      locs.forEach(function(l){ if(existing.locations.indexOf(l)<0) existing.locations.push(l); });
+    } else {
+      store[day][key]={ ndc:String(ndc||key), drug:drug||'', locations:locs, at:Date.now() };
+    }
+    mlSave(store);
+    if(typeof scheduleMultiLocRender==='function') scheduleMultiLocRender(50);
+    return true;
+  }
+  function mlRemoveEntry(day, key){
+    var store=mlLoad();
+    if(store[day]){ delete store[day][key]; if(!Object.keys(store[day]).length) delete store[day]; mlSave(store); }
+  }
+  function mlPrettyDay(day){
+    try { var p=day.split('-'); return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]))
+      .toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'}); }
+    catch(e){ return day; }
+  }
+  function mlCount(){ var s=mlLoad(),n=0; Object.keys(s).forEach(function(d){ n+=Object.keys(s[d]).length; }); return n; }
+  // Public API: the receiving overlay calls this when a received item has >1
+  // suggested location. Available cross-asset via window on the shared page.
+  window.__ptx7FlagMultiLoc = function(ndc, drug, locations){ try { return mlFlag(ndc, drug, locations); } catch(e){ return false; } };
+
   function visible(element) {
     if (!element) return false;
     var css = getComputedStyle(element), rect = element.getBoundingClientRect();
@@ -175,7 +230,19 @@
     '#ptx7-route-message{position:fixed;left:18px;right:18px;top:16px;z-index:2147483646;display:none;padding:20px;border:4px solid #f0a000;border-radius:14px;background:#fff4e5;color:#8a4b00;font:900 28px Arial;box-shadow:0 5px 18px #0004}' +
     'html.ptx7-native-action [role="dialog"],html.ptx7-native-action [aria-modal="true"]{position:fixed!important;inset:70px 70px 280px!important;width:auto!important;max-width:none!important;height:auto!important;max-height:none!important;overflow:auto!important;padding:42px!important;font-size:48px!important;border:7px solid #007a83!important;border-radius:24px!important;background:#fff!important;z-index:2147483000!important;box-sizing:border-box!important}' +
     'html.ptx7-native-action [role="dialog"] input,html.ptx7-native-action [role="dialog"] select,html.ptx7-native-action [role="dialog"] button,html.ptx7-native-action [aria-modal="true"] input,html.ptx7-native-action [aria-modal="true"] select,html.ptx7-native-action [aria-modal="true"] button{min-height:96px!important;font-size:42px!important;padding:18px!important}' +
-    '@media(max-width:900px){#ptx7-inventory-search{grid-template-columns:90px 1fr}#ptx7-inventory-submit{grid-column:1/-1;width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}';
+    '@media(max-width:900px){#ptx7-inventory-search{grid-template-columns:90px 1fr}#ptx7-inventory-submit{grid-column:1/-1;width:100%}#ptx7-inventory-actions{grid-template-columns:1fr}.ptx7-metrics{grid-template-columns:1fr}}' +
+    '#ptx7-multiloc-panel{margin:0 0 22px;border:5px solid #d99b00;border-radius:20px;background:#fff8e5;overflow:hidden}' +
+    '.ptx7-ml-head{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#ffe9a6;color:#5a4300;font-weight:900;font-size:32px;padding:18px 20px}' +
+    '.ptx7-ml-clear{border:0;border-radius:12px;background:#b42318;color:#fff;font-weight:900;font-size:22px;padding:12px 18px}' +
+    '.ptx7-ml-day{background:#fff3cd;color:#5a4300;font-weight:900;font-size:24px;padding:12px 20px;border-top:2px solid #e2c66e}' +
+    '.ptx7-ml-item{padding:16px 20px;border-top:1px solid #ead9a0}' +
+    '.ptx7-ml-top{display:flex;align-items:center;justify-content:space-between;gap:12px}' +
+    '.ptx7-ml-ndc{font-weight:900;font-size:28px;color:#172b3a}' +
+    '.ptx7-ml-done{border:0;border-radius:12px;background:#087f3f;color:#fff;font-weight:900;font-size:22px;padding:12px 20px}' +
+    '.ptx7-ml-drug{font-size:24px;color:#394b59;margin:8px 0 10px;font-weight:700}' +
+    '.ptx7-ml-locs{display:flex;flex-wrap:wrap;gap:12px}' +
+    '.ptx7-ml-loc{border:4px solid #075f67;border-radius:14px;background:#fff;color:#075f67;font-weight:900;font-size:28px;padding:14px 20px;letter-spacing:.5px}' +
+    '.ptx7-ml-loc:active{background:#e6f6eb}';
   document.head.appendChild(style);
 
   var inventoryRoot = document.createElement('section');
@@ -226,6 +293,65 @@
       '<div id="ptx7-location-results"></div>' +
     '</main>';
   document.body.appendChild(locationRoot);
+
+  // Multi-location review panel (beta21): persistent, lives above the search
+  // results so renderLocation() overwriting #ptx7-location-results never wipes
+  // it. Each flagged location links into the existing REMOVE flow.
+  var multiLocPanel = document.createElement('section');
+  multiLocPanel.id = 'ptx7-multiloc-panel';
+  multiLocPanel.style.display = 'none';
+  var mlContentHost = locationRoot.querySelector('#ptx7-location-content');
+  var mlResultsHost = locationRoot.querySelector('#ptx7-location-results');
+  if (mlContentHost && mlResultsHost) mlContentHost.insertBefore(multiLocPanel, mlResultsHost);
+  else locationRoot.appendChild(multiLocPanel);
+
+  var multiLocRenderTimer = null;
+  function scheduleMultiLocRender(delay){ clearTimeout(multiLocRenderTimer); multiLocRenderTimer=setTimeout(renderMultiLoc, delay||100); }
+  function renderMultiLoc(){
+    var store = mlLoad();
+    var days = Object.keys(store).sort().reverse(); // newest day first
+    var total = mlCount();
+    if (!total) { multiLocPanel.style.display='none'; multiLocPanel.innerHTML=''; return; }
+    var html = '<header class="ptx7-ml-head">MULTI-LOCATION REVIEW ('+total+')'+
+      '<button type="button" id="ptx7-ml-clear" class="ptx7-ml-clear">CLEAR ALL</button></header>';
+    days.forEach(function(day){
+      var entries = store[day];
+      var keys = Object.keys(entries).sort(function(a,b){ return entries[b].at - entries[a].at; });
+      html += '<div class="ptx7-ml-day">'+esc(mlPrettyDay(day))+' \u00b7 '+keys.length+' item'+(keys.length===1?'':'s')+'</div>';
+      keys.forEach(function(key){
+        var e = entries[key];
+        html += '<div class="ptx7-ml-item"><div class="ptx7-ml-top"><span class="ptx7-ml-ndc">NDC '+esc(e.ndc)+'</span>'+
+          '<button type="button" class="ptx7-ml-done" data-ml-day="'+esc(day)+'" data-ml-key="'+esc(key)+'">DONE</button></div>';
+        if (e.drug) html += '<div class="ptx7-ml-drug">'+esc(e.drug)+'</div>';
+        html += '<div class="ptx7-ml-locs">';
+        e.locations.forEach(function(loc){
+          html += '<button type="button" class="ptx7-ml-loc" data-ml-loc="'+esc(loc)+'">'+esc(loc)+'</button>';
+        });
+        html += '</div></div>';
+      });
+    });
+    multiLocPanel.innerHTML = html;
+    multiLocPanel.style.display = 'block';
+    // Wire: clicking a location opens it in the existing Locations search,
+    // which surfaces the native REMOVE flow for that location.
+    [].slice.call(multiLocPanel.querySelectorAll('.ptx7-ml-loc')).forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var loc = btn.getAttribute('data-ml-loc');
+        try { locationInput.value = loc; } catch(_){}
+        submitLocationSearch(loc, false);
+      });
+    });
+    [].slice.call(multiLocPanel.querySelectorAll('.ptx7-ml-done')).forEach(function(btn){
+      btn.addEventListener('click', function(){
+        mlRemoveEntry(btn.getAttribute('data-ml-day'), btn.getAttribute('data-ml-key'));
+        renderMultiLoc();
+      });
+    });
+    var clearBtn = multiLocPanel.querySelector('#ptx7-ml-clear');
+    if (clearBtn) clearBtn.addEventListener('click', function(){
+      if (confirm('Clear the entire multi-location review list on this device?')) { mlSave({}); renderMultiLoc(); }
+    });
+  }
 
   var inventoryInput = inventoryRoot.querySelector('#ptx7-inventory-input');
   var inventoryMessage = inventoryRoot.querySelector('#ptx7-inventory-message');
@@ -655,6 +781,7 @@
 
   function renderLocation() {
     if(currentMode()!=='locations'||!locationsSimple)return;
+    renderMultiLoc();
     var text=nativeBodyText();
     var headings=nativeHeadings().filter(function(h){return !/Pharmacy Inventory Management Console|Stock Locations?$/i.test(h);});
     var code=(text.match(/\b[A-Z]{2,}[A-Z0-9]*\d{2,}(?:-[A-Z0-9]+)+\b/)||[''])[0];
@@ -1387,5 +1514,5 @@
     fullButton.style.display='none';
     maintain();
     setTimeout(function(){try{inventoryInput.focus({preventScroll:true});}catch(_){}},0);
-  }, showLocations:function(){locationsSimple=true;nativeActionActive=false;document.documentElement.classList.remove('ptx7-native-action');maintain();setTimeout(function(){try{locationInput.focus({preventScroll:true});}catch(_){}},0);}, inventoryUrl:INVENTORY_URL};
+  }, showLocations:function(){locationsSimple=true;nativeActionActive=false;document.documentElement.classList.remove('ptx7-native-action');maintain();renderMultiLoc();setTimeout(function(){try{locationInput.focus({preventScroll:true});}catch(_){}},0);}, inventoryUrl:INVENTORY_URL};
 })();
